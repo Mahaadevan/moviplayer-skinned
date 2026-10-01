@@ -2,24 +2,24 @@
 const COPY_OK = ['mkv','ts','m2ts','mts','mov','mp4','m4v','flv','f4v','webm'];
 let ff = null;
 
-export async function convert(file, {audioOnly, onProgress, onLog, signal}) {
+export async function convert(file, {audioOnly, reencode, onProgress, onLog, signal}) {
   const ext = file.name.split('.').pop().toLowerCase();
   const outExt = audioOnly ? 'm4a' : 'mp4';
   try {
     onLog('Trying GPU path (WebCodecs hardware encode/decode)…');
-    return await viaGpu(file, outExt, onProgress, onLog);
+    return await viaGpu(file, outExt, reencode, onProgress, onLog);
   } catch (e) {
     onLog('GPU path unavailable: ' + e.message + '\nFalling back to CPU (ffmpeg.wasm)…');
   }
-  return viaCpu(file, ext, outExt, audioOnly, onProgress, onLog, signal);
+  return viaCpu(file, ext, outExt, audioOnly, reencode, onProgress, onLog, signal);
 }
 
-async function viaGpu(file, outExt, onProgress, onLog) {
+async function viaGpu(file, outExt, reencode, onProgress, onLog) {
   if (!('VideoEncoder' in window)) throw new Error('WebCodecs not supported in this browser');
   const M = await import('https://cdn.jsdelivr.net/npm/mediabunny@1/+esm');
   const input = new M.Input({source: new M.BlobSource(file), formats: M.ALL_FORMATS});
   const output = new M.Output({format: outExt === 'm4a' ? new M.Mp4OutputFormat({fastStart: 'in-memory'}) : new M.Mp4OutputFormat({fastStart: 'in-memory'}), target: new M.BufferTarget()});
-  const c = await M.Conversion.init({input, output, video: outExt === 'm4a' ? {discard: true} : undefined});
+  const c = await M.Conversion.init({input, output, video: outExt === 'm4a' ? {discard: true} : {codec: 'avc', forceTranscode: !!reencode}, audio: {codec: 'aac'}});
   if (!c.isValid) throw new Error('conversion not valid for this file');
   if (c.discardedTracks.length) throw new Error(c.discardedTracks.map(t => t.track.type + ': ' + t.reason).join(', '));
   c.onProgress = p => onProgress(p);
@@ -43,15 +43,15 @@ async function loadFF(onLog) {
   return ff;
 }
 
-async function viaCpu(file, ext, outExt, audioOnly, onProgress, onLog, signal) {
+async function viaCpu(file, ext, outExt, audioOnly, reencode, onProgress, onLog, signal) {
   const f = await loadFF(onLog);
   f.on('progress', ({progress}) => onProgress(Math.min(1, Math.max(0, progress))));
   signal?.addEventListener('abort', () => { f.terminate(); ff = null; });
   const inName = 'in.' + ext, out = 'out.' + outExt;
   await f.writeFile(inName, new Uint8Array(await file.arrayBuffer()));
   const attempts = audioOnly ? [['-vn', '-c:a', 'aac', '-b:a', '192k']]
-    : [...(COPY_OK.includes(ext) ? [['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k']] : []),
-       ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k']];
+    : [...(COPY_OK.includes(ext) && !reencode ? [['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k']] : []),
+       ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:a', 'aac', '-b:a', '192k']];
   for (const a of attempts) {
     onLog('ffmpeg ' + a.join(' '));
     if (await f.exec(['-i', inName, ...a, '-y', out]) === 0) {
