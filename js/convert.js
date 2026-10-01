@@ -207,24 +207,30 @@ async function loadFF(signal) {
       }
 
       const { toBlobURL } = window.FFmpegUtil;
-      const f = new window.FFmpegWASM.FFmpeg();
-      const coreBase = `${CDN}@ffmpeg/core@0.12.6/dist/umd`;
       const mainBase = `${CDN}@ffmpeg/ffmpeg@0.12.10/dist/umd`;
+      const workerURL = await toBlobURL(`${mainBase}/814.ffmpeg.js`, 'text/javascript');
 
-      await f.load({
-        classWorkerURL: await toBlobURL(
-          `${mainBase}/814.ffmpeg.js`,
-          'text/javascript'
-        ),
-        coreURL: await toBlobURL(
-          `${coreBase}/ffmpeg-core.js`,
-          'text/javascript'
-        ),
-        wasmURL: await toBlobURL(
-          `${coreBase}/ffmpeg-core.wasm`,
-          'application/wasm'
-        ),
-      });
+      // ffmpeg.wasm starts its worker as a module worker, which cannot importScripts()
+      // the UMD core ("failed to import ffmpeg-core.js"). The ESM core is the one
+      // that works there; UMD stays as a fallback for classic-worker builds.
+      let f = null, lastErr = null;
+      for (const flavor of ['esm', 'umd']) {
+        const coreBase = `${CDN}@ffmpeg/core@0.12.6/dist/${flavor}`;
+        const attempt = new window.FFmpegWASM.FFmpeg();
+        try {
+          await attempt.load({
+            classWorkerURL: workerURL,
+            coreURL: await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
+            wasmURL: await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
+          });
+          f = attempt;
+          break;
+        } catch (err) {
+          lastErr = err;
+          try { attempt.terminate(); } catch {}
+        }
+      }
+      if (!f) throw lastErr || new Error('core failed to load');
 
       FF = f; // `loaded` is a read-only getter on FFmpeg; assigning it threw and broke every conversion
       return f;
@@ -241,13 +247,13 @@ async function loadFF(signal) {
   return f;
 }
 
-// Keep dimensions even and cap the width at 1920. -2 preserves aspect ratio.
+// Keep dimensions even and cap the width at 1280 (CPU path is slow). -2 preserves aspect ratio.
 const X264 = [
   '-c:v', 'libx264',
   '-preset', 'ultrafast',
-  '-crf', '25',
+  '-crf', '27',
   '-pix_fmt', 'yuv420p',
-  '-vf', 'scale=trunc(min(1920\\,iw)/2)*2:-2',
+  '-vf', 'scale=trunc(min(1280\\,iw)/2)*2:-2',
 ];
 const AAC = ['-c:a', 'aac', '-b:a', '192k', '-ac', '2'];
 const PROBE = ['-probesize', '50M', '-analyzeduration', '100M'];
