@@ -69,7 +69,7 @@ async function play(i, converted) {
   kind = AUDIO.includes(e) ? 'audio' : 'video';
   V.src = url; V.style.display = kind === 'video' ? 'block' : 'none';
   if (kind === 'audio') { VIZ.style.display = 'block'; startViz(); }
-  V.onerror = () => needConvert(f, 'This browser cannot decode ' + f.name + '.');
+  V.onerror = () => asked.has(f) && converted ? toast('Converted file still not playable: ' + (V.error?.message || 'decode error')) : needConvert(f, 'This browser cannot decode ' + f.name + '.');
   try { await V.play(); } catch (err) { if (err.name !== 'AbortError' && err.name !== 'NotAllowedError') needConvert(f, 'Playback failed.'); return; }
   // MKV/others: video plays but the audio codec (AC3, DTS…) may be unsupported
   if (kind === 'video') setTimeout(() => {
@@ -88,7 +88,7 @@ async function needConvert(f, why) {
   const ac = new AbortController();
   $('no').onclick = () => { ac.abort(); $('modal').hidden = true; $('yes').hidden = false; };
   try {
-    const out = await convert(f, {audioOnly: kind === 'audio', signal: ac.signal,
+    const out = await convert(f, {audioOnly: kind === 'audio', reencode: !/audio track/.test(why), signal: ac.signal,
       onProgress: p => { $('pfill').style.width = p * 100 + '%'; $('ppct').textContent = (p * 100).toFixed(1) + '%'; },
       onLog: m => { const l = $('log'); l.textContent += m + '\n'; l.scrollTop = l.scrollHeight; }});
     $('modal').hidden = true; $('yes').hidden = false;
