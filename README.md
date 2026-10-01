@@ -1,4 +1,4 @@
-# Cone — local web media player
+# local web media player
 
 Drag-and-drop VLC-style player that runs entirely in the browser. Files never leave your device.
 
