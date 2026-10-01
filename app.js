@@ -74,11 +74,13 @@ async function play(i, converted) {
   // MKV/others: video plays but the audio codec (AC3, DTS…) may be unsupported
   if (kind === 'video') setTimeout(() => {
     const silent = V.webkitAudioDecodedByteCount === 0 || V.mozHasAudio === false || (V.audioTracks && V.audioTracks.length === 0);
-    if (!V.paused && silent && V.currentTime > .5) needConvert(f, 'The video plays but its audio track is not supported by this browser.');
+    if (queue[i] === f && !V.paused && silent && V.currentTime > .5) needConvert(f, 'The video plays but its audio track is not supported by this browser.');
   }, 1800);
 }
+const asked = new WeakSet();
 async function needConvert(f, why) {
-  if ($('modal').hidden === false) return;
+  if ($('modal').hidden === false || asked.has(f)) return;
+  asked.add(f);
   V.pause();
   if (!await ask('Convert to a playable format?', `${why} Convert locally to ${kind === 'audio' ? 'M4A (AAC)' : 'MP4 (H.264/AAC)'}? Nothing leaves your device. Your GPU is used when available, otherwise the CPU.`)) return;
   $('yes').hidden = true; $('no').textContent = 'Cancel'; $('prog').hidden = false; $('log').textContent = ''; $('pfill').style.width = '0';
@@ -90,7 +92,7 @@ async function needConvert(f, why) {
       onProgress: p => { $('pfill').style.width = p * 100 + '%'; $('ppct').textContent = (p * 100).toFixed(1) + '%'; },
       onLog: m => { const l = $('log'); l.textContent += m + '\n'; l.scrollTop = l.scrollHeight; }});
     $('modal').hidden = true; $('yes').hidden = false;
-    queue[idx] = out; play(idx, true);
+    asked.add(out); queue[idx] = out; play(idx, true);
   } catch (err) {
     if (ac.signal.aborted) return;
     $('modal').hidden = true; $('yes').hidden = false; toast('Conversion failed: ' + err.message);
