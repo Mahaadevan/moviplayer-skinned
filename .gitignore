@@ -1,0 +1,27 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Node (if add tooling later)
+node_modules/
+package-lock.json
+dist/
+
+# Logs and local env
+*.log
+.env
+
+# Test media: keep it out of the repo
+*.mkv
+*.mp4
+*.avi
+*.mov
+*.flac
+*.mp3
+*.wav
