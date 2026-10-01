@@ -1,40 +1,29 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cone — local media player</title>
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VLC Web Player</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.css">
 <link rel="stylesheet" href="style.css">
-<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
-</head>
-<body>
-<div class="bg"></div>
-<main id="stage">
-  <video id="video" playsinline></video>
-  <img id="image" alt="">
-  <canvas id="viz"></canvas>
-  <div id="drop"><div class="cone">▲</div><h1>Drop media here</h1><p>or <label class="link">browse<input id="file" type="file" multiple hidden></label> · everything stays on your device</p></div>
-  <div id="title"></div>
-</main>
-<aside id="list"><header>Playlist</header><ol id="items"></ol></aside>
-<footer id="bar">
-  <div id="seek"><div id="buf"></div><div id="fill"></div><div id="loop"></div><i id="mA" class="mk">A</i><i id="mB" class="mk">B</i></div>
-  <div class="row">
-    <button id="prev" title="Previous">⏮</button><button id="play" title="Play/Pause (space)">▶</button><button id="next" title="Next">⏭</button>
-    <span id="time">0:00 / 0:00</span>
-    <span class="grow"></span>
-    <button id="setA" title="Set loop start">A</button><button id="setB" title="Set loop end">B</button><button id="clr" title="Clear loop">✕ loop</button>
-    <select id="rate"><option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>2</option></select>
-    <button id="mute">🔊</button><input id="vol" type="range" min="0" max="1" step="0.01" value="1">
-    <button id="pl" title="Playlist">☰</button><button id="fs" title="Fullscreen (f)">⛶</button>
+</head><body>
+<header>
+  <b>🔶 VLC Web Player</b>
+  <form id="urlf"><input id="url" placeholder="Stream / media URL (.m3u8, .mpd, .mp4…)" autocomplete="off"><button>Play URL</button></form>
+  <button id="open">Open files…</button>
+</header>
+<main>
+  <div id="stage">
+    <div id="drop"><div class="cone">🔶</div><h2>Drop files here</h2><p>Video, audio, images, playlists or .zip</p></div>
+    <video id="v" playsinline></video>
+    <img id="img" alt="" hidden><div id="art" hidden>♪</div>
+    <div id="ov" hidden><div id="msg"></div><div id="bar" hidden><i></i></div><button id="cancel">Cancel</button></div>
+    <div id="toast" hidden></div>
   </div>
-</footer>
-<div id="toasts"></div>
-<div id="modal" hidden><div class="card"><h2 id="mt"></h2><p id="mb"></p>
-  <div id="prog" hidden><div class="pbar"><div id="pfill"></div></div><small id="ppct"></small><pre id="log"></pre></div>
-  <div class="btns"><button id="no">No</button><button id="yes" class="pri">Yes, convert</button></div></div></div>
+  <aside>
+    <h3>Playlist <span><button id="prev" title="Previous (P)">⏮</button><button id="next" title="Next (N)">⏭</button><button id="shuf" title="Shuffle">🔀</button><button id="rep" title="Repeat: off">🔁</button><button id="clr">Clear</button></span></h3>
+    <div id="list"></div>
+  </aside>
+</main>
+<input type="file" id="fi" multiple hidden>
+<script src="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.polyfilled.min.js"></script>
 <script type="module" src="app.js"></script>
-</body>
-</html>
+</body></html>
