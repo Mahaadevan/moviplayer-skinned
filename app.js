@@ -1,163 +1,158 @@
-import {convert} from './convert.js';
-const $ = id => document.getElementById(id);
-const V = $('video'), IMG = $('image'), VIZ = $('viz');
-const AUDIO = 'aac ac3 adt adts aif aifc aiff amr aob ape au caf cda dts flac m4a m4p mid mka mlp mp1 mp2 mp3 mpa mpc oga ogg oma opus qcp ra rmi snd spx tta voc vqf w64 wav weba wma wv xa 669 it mod s3m xm'.split(' ');
-const IMAGE = 'jpg jpeg png gif webp avif bmp svg ico'.split(' ');
-const LISTS = 'm3u m3u8 pls xspf wpl zpl asx b4s ram wvx'.split(' ');
-const UNSUPPORTED = {iso: 'Disc images (.iso/.ifo/.vob menus) cannot be mounted in a browser.', rar: 'RAR archives are not supported; use .zip.', mid: 'MIDI needs a synthesizer, which is not bundled yet.', rmi: 'MIDI needs a synthesizer, which is not bundled yet.',
-  669: 'Tracker modules are not bundled yet.', it: 'Tracker modules are not bundled yet.', mod: 'Tracker modules are not bundled yet.', s3m: 'Tracker modules are not bundled yet.', xm: 'Tracker modules are not bundled yet.'};
-const ext = n => n.split('.').pop().toLowerCase();
-let queue = [], idx = -1, url = null, A = null, B = null, kind = '', actx, an, src, raf;
+import { probe, engines, lib } from './convert.js';
+const CDN = 'https://cdn.jsdelivr.net/npm/';
+const $ = s => document.querySelector(s), V = $('#v'), IMG = $('#img');
+const ext = n => (n.split(/[?#]/)[0].split('.').pop() || '').toLowerCase();
+const base = n => n.split(/[?#]/)[0].split(/[\\/]/).pop();
+const set = s => new Set(s.split(' '));
+const AUDIO = set('3ga aac ac3 adt adts aif aifc aiff amr aob ape au caf cda dts flac it m4a m4p mid mka mlp mod mp1 mp2 mp3 mpa mpc oga ogg oma opus qcp ra rmi s3m snd spx tta voc vqf w64 wav wma wv xa xm 669 a52');
+const PIC = set('png jpg jpeg gif webp bmp svg avif ico apng');
+const LIST = set('m3u m3u8 pls xspf wpl zpl asx wvx b4s ram');
 
-// ---------- feedback ----------
-function toast(msg) {
-  const t = Object.assign(document.createElement('div'), {className: 'toast', textContent: msg});
-  $('toasts').append(t);
-  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, 4500);
+const P = new Plyr(V, { controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
+  settings: ['speed'], speed: { selected: 1, options: [.5, .75, 1, 1.25, 1.5, 2] }, keyboard: { focused: true, global: true }, storage: { enabled: false } });
+const box = P.elements.container;
+
+let q = [], cur = -1, tok = 0, shuf = false, rep = 0, ac = null, live = false, hls = null, dash = null, srcUrl = null;
+const conv = new WeakMap();           // File -> {url, aud} cached conversions
+const origUrls = new WeakMap();
+
+// ---------- UI helpers ----------
+function show(k) { box.style.display = k === 'video' || k === 'audio' ? '' : 'none'; IMG.hidden = k !== 'img'; $('#art').hidden = k !== 'audio'; $('#drop').hidden = !!k; }
+function ov(msg, pct) { $('#ov').hidden = !msg; $('#msg').textContent = msg || ''; $('#bar').hidden = pct == null; if (pct != null) $('#bar i').style.width = pct + '%'; }
+let tt; function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 5000); }
+function render() { const l = $('#list'); l.textContent = ''; q.forEach((it, i) => { const d = document.createElement('div'); d.className = 'it' + (i === cur ? ' on' : ''); d.textContent = (i + 1) + '. ' + it.name; d.title = it.name; d.onclick = () => play(i); l.append(d); }); }
+const blobUrl = f => origUrls.get(f) || (origUrls.set(f, URL.createObjectURL(f)), origUrls.get(f));
+
+// ---------- queue / playlists ----------
+async function expand(files) {
+  const out = [];
+  for (const f of files) {
+    if (ext(f.name) !== 'zip') { out.push(f); continue; }
+    try { await lib('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+      const z = await JSZip.loadAsync(f);
+      for (const en of Object.values(z.files)) if (!en.dir) out.push(new File([await en.async('blob')], base(en.name)));
+    } catch (e) { toast('Cannot read zip: ' + e.message); }
+  }
+  return out;
 }
-function ask(title, body) {
+async function parsePl(f) {
+  const t = await f.text(), e = ext(f.name);
+  if (['m3u', 'm3u8', 'ram'].includes(e)) return t.split(/\r?\n/).map(s => s.trim()).filter(s => s && s[0] !== '#');
+  if (e === 'pls') return [...t.matchAll(/^File\d+=(.+)$/gim)].map(m => m[1].trim());
+  const r = [], d = new DOMParser().parseFromString(t, 'text/xml');
+  d.querySelectorAll('location,media,ref,entry').forEach(n => { const s = n.textContent.trim() || n.getAttribute('src') || n.getAttribute('href') || n.getAttribute('Playstring'); if (s) r.push(s); });
+  return r;
+}
+async function add(list) {
+  const files = await expand([...list]), pls = files.filter(f => LIST.has(ext(f.name))), media = files.filter(f => !LIST.has(ext(f.name)));
+  let items = [];
+  if (pls.length) {
+    const map = new Map(media.map(f => [f.name.toLowerCase(), f]));
+    for (const p of pls) for (const ref of await parsePl(p)) {
+      let b = base(ref.replace(/^file:\/+/, '')); try { b = decodeURIComponent(b); } catch {}
+      const f = map.get(b.toLowerCase());
+      if (f) { items.push({ name: f.name, file: f }); map.delete(b.toLowerCase()); }
+      else if (/^https?:/i.test(ref)) items.push({ name: b || ref, url: ref });
+    }
+    map.forEach(f => items.push({ name: f.name, file: f }));
+  } else items = media.map(f => ({ name: f.name, file: f }));
+  if (!items.length) return;
+  const first = q.length; q.push(...items);
+  if (cur < 0) play(first); else render();
+}
+
+// ---------- playback engines ----------
+function destroyStream() { hls?.destroy(); hls = null; dash?.reset(); dash = null; }
+function tryNative(src, aud) {
   return new Promise(res => {
-    $('mt').textContent = title; $('mb').textContent = body; $('prog').hidden = true;
-    $('yes').textContent = 'Yes, convert'; $('no').textContent = 'No'; $('modal').hidden = false;
-    $('yes').onclick = () => res(true); $('no').onclick = () => { $('modal').hidden = true; res(false); };
+    const end = ok => { clearTimeout(t); V.removeEventListener('loadedmetadata', m); V.removeEventListener('error', e); res(ok); };
+    const m = () => end(aud || V.videoWidth > 0), e = () => end(false), t = setTimeout(() => end(false), 20000);
+    V.addEventListener('loadedmetadata', m); V.addEventListener('error', e);
+    V.src = src; V.load();
   });
 }
-
-// ---------- intake ----------
-const fmt = s => isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
-async function addFiles(files) {
-  const media = [];
-  for (const f of files) {
-    const e = ext(f.name);
-    if (e === 'zip') {
-      try {
-        const z = fflate.unzipSync(new Uint8Array(await f.arrayBuffer()));
-        for (const [n, d] of Object.entries(z)) if (d.length) media.push(new File([d], n.split('/').pop()));
-      } catch { toast('Could not open ' + f.name); }
-    } else media.push(f);
-  }
-  const byName = new Map(media.map(f => [f.name.toLowerCase(), f]));
-  let out = [];
-  for (const f of media) {
-    if (LISTS.includes(ext(f.name))) {
-      const txt = await f.text();
-      const names = [...txt.matchAll(/^(?!#)(?:File\d+=)?(.+\.[a-z0-9]{2,5})\s*$|(?:location|src|href)[>="']+([^<"']+)/gim)].map(m => (m[1] || m[2]).split(/[\\/]/).pop().trim().toLowerCase());
-      const hit = names.map(n => byName.get(n)).filter(Boolean);
-      hit.length ? out.push(...hit) : toast(`${f.name}: drop its media files together with the playlist.`);
-    } else out.push(f);
-  }
-  out = [...new Set(out)].filter(f => !LISTS.includes(ext(f.name)));
-  if (!out.length) return;
-  queue.push(...out); render();
-  if (idx < 0 || !document.body.classList.contains('has')) play(queue.length - out.length);
+const wait = (ms, v) => new Promise(r => setTimeout(() => r(v), ms));
+async function stream(url) {
+  show('video'); ov('Opening stream…');
+  const isHls = /\.m3u8(\?|#|$)/i.test(url), isDash = /\.mpd(\?|#|$)/i.test(url);
+  if (isHls && !V.canPlayType('application/vnd.apple.mpegurl')) {
+    await lib(CDN + 'hls.js@1.5.17/dist/hls.min.js');
+    if (!Hls.isSupported()) throw new Error('HLS is not supported in this browser');
+    hls = new Hls(); hls.loadSource(url); hls.attachMedia(V);
+    await new Promise((res, rej) => { hls.on(Hls.Events.MANIFEST_PARSED, res); hls.on(Hls.Events.ERROR, (_, d) => d.fatal && rej(new Error('HLS error: ' + d.details))); });
+  } else if (isDash) {
+    await lib(CDN + 'dashjs@4.7.4/dist/dash.all.min.js');
+    dash = dashjs.MediaPlayer().create(); dash.initialize(V, url, false);
+    await new Promise((res, rej) => { dash.on('streamInitialized', res); dash.on('error', e => rej(new Error('DASH error: ' + (e.error?.message || e.error)))); });
+  } else if (!await tryNative(url, false) && !await tryNative(url, true)) throw new Error('Cannot play this URL (format or CORS)');
 }
-function render() {
-  $('items').innerHTML = '';
-  queue.forEach((f, i) => { const li = Object.assign(document.createElement('li'), {textContent: f.name, className: i === idx ? 'cur' : ''}); li.onclick = () => play(i); $('items').append(li); });
-}
-
-// ---------- playback ----------
-async function play(i, converted) {
-  if (i < 0 || i >= queue.length) return;
-  idx = i; render(); clearLoop();
-  const f = queue[i], e = ext(f.name);
-  if (UNSUPPORTED[e] && !converted) { toast(`${f.name}: ${UNSUPPORTED[e]}`); return; }
-  V.pause(); if (url) URL.revokeObjectURL(url); url = URL.createObjectURL(f);
-  document.body.classList.add('has'); $('title').textContent = f.name;
-  IMG.style.display = V.style.display = VIZ.style.display = 'none';
-  if (IMAGE.includes(e)) { kind = 'image'; IMG.src = url; IMG.style.display = 'block'; return; }
-  kind = AUDIO.includes(e) ? 'audio' : 'video';
-  V.src = url; V.style.display = kind === 'video' ? 'block' : 'none';
-  if (kind === 'audio') { VIZ.style.display = 'block'; startViz(); }
-  V.onerror = () => asked.has(f) && converted ? toast('Converted file still not playable: ' + (V.error?.message || 'decode error')) : needConvert(f, 'This browser cannot decode ' + f.name + '.');
-  try { await V.play(); } catch (err) { if (err.name !== 'AbortError' && err.name !== 'NotAllowedError') needConvert(f, 'Playback failed.'); return; }
-  // MKV/others: video plays but the audio codec (AC3, DTS…) may be unsupported
-  if (kind === 'video') setTimeout(() => {
-    const silent = V.webkitAudioDecodedByteCount === 0 || V.mozHasAudio === false || (V.audioTracks && V.audioTracks.length === 0);
-    if (queue[i] === f && !V.paused && silent && V.currentTime > .5) needConvert(f, 'The video plays but its audio track is not supported by this browser.');
-  }, 1800);
-}
-const asked = new WeakSet();
-async function needConvert(f, why) {
-  if ($('modal').hidden === false || asked.has(f)) return;
-  asked.add(f);
-  V.pause();
-  if (!await ask('Convert to a playable format?', `${why} Convert locally to ${kind === 'audio' ? 'M4A (AAC)' : 'MP4 (H.264/AAC)'}? Nothing leaves your device. Your GPU is used when available, otherwise the CPU.`)) return;
-  $('yes').hidden = true; $('no').textContent = 'Cancel'; $('prog').hidden = false; $('log').textContent = ''; $('pfill').style.width = '0';
-  $('mt').textContent = 'Converting…'; $('mb').textContent = f.name;
-  const ac = new AbortController();
-  $('no').onclick = () => { ac.abort(); $('modal').hidden = true; $('yes').hidden = false; };
-  try {
-    const out = await convert(f, {audioOnly: kind === 'audio', reencode: !/audio track/.test(why), signal: ac.signal,
-      onProgress: p => { $('pfill').style.width = p * 100 + '%'; $('ppct').textContent = (p * 100).toFixed(1) + '%'; },
-      onLog: m => { const l = $('log'); l.textContent += m + '\n'; l.scrollTop = l.scrollHeight; }});
-    $('modal').hidden = true; $('yes').hidden = false;
-    asked.add(out); queue[idx] = out; play(idx, true);
-  } catch (err) {
-    if (ac.signal.aborted) return;
-    $('modal').hidden = true; $('yes').hidden = false; toast('Conversion failed: ' + err.message);
+function ready(aud) {
+  ov(); show(aud ? 'audio' : 'video'); live = true;
+  P.play().catch(() => {});
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: q[cur]?.name || '' });
+    navigator.mediaSession.setActionHandler('previoustrack', () => play(cur - 1));
+    navigator.mediaSession.setActionHandler('nexttrack', () => play(next()));
   }
 }
 
-// ---------- spectrum ----------
-function startViz() {
-  if (!actx) { actx = new AudioContext(); an = actx.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = .82; src = actx.createMediaElementSource(V); src.connect(an); an.connect(actx.destination); }
-  actx.resume(); cancelAnimationFrame(raf);
-  const g = VIZ.getContext('2d'), d = new Uint8Array(an.frequencyBinCount);
-  (function draw() {
-    raf = requestAnimationFrame(draw);
-    const w = VIZ.width = VIZ.clientWidth, h = VIZ.height = VIZ.clientHeight; an.getByteFrequencyData(d);
-    const n = 64, bw = w / n, gr = g.createLinearGradient(0, h, 0, 0); gr.addColorStop(0, '#ff8a00'); gr.addColorStop(1, '#5ee7ff');
-    g.fillStyle = gr; g.shadowColor = '#ff8a00'; g.shadowBlur = 14;
-    for (let i = 0; i < n; i++) { const v = d[Math.floor(i * d.length * .7 / n)] / 255, bh = Math.max(3, v * h * .6); g.fillRect(i * bw + 2, (h - bh) * .55, bw - 4, bh); g.globalAlpha = .18; g.fillRect(i * bw + 2, (h + bh) * .55 - bh + bh, bw - 4, bh * .5); g.globalAlpha = 1; }
-  })();
+async function load(it, my) {
+  const f = it.file, e = ext(it.name);
+  if (it.url) { await stream(it.url); return ready(false); }
+  if (PIC.has(e)) { show('img'); IMG.src = blobUrl(f); return ov(); }
+  const c = conv.get(f);
+  if (c) { show(c.aud ? 'audio' : 'video'); if (await tryNative(c.url, c.aud)) return ready(c.aud); conv.delete(f); }
+  show('video'); ov('Analysing ' + it.name + '…');
+  const pr = await Promise.race([probe(f), wait(5000, null)]);
+  const aud = AUDIO.has(e) || (!!pr && !pr.hasVideo);
+  const ok = await tryNative(blobUrl(f), aud);
+  if (ok && pr?.audioOk !== false) return ready(aud);
+  if (my !== tok) return;
+
+  // Needs conversion: pick the cheapest plan, escalate on failure.
+  const plan = { audioOnly: aud, v: ok ? false : pr ? !pr.videoOk : true, a: pr ? !pr.audioOk : true };
+  const tries = [];
+  if (pr) tries.push(['gpu', plan]);
+  tries.push(['wasm', plan]);
+  if (!plan.v || !plan.a) tries.push(['wasm', { ...plan, v: true, a: true }]);
+  ac = new AbortController(); const signal = ac.signal; let last;
+  for (const [eng, pl] of tries) {
+    if (signal.aborted) break;
+    try {
+      const label = 'Converting ' + it.name + (eng === 'gpu' ? ' (hardware)' : ' (ffmpeg, slower)') + (pl.v ? '' : ' – no video re-encode');
+      ov(eng === 'wasm' ? 'Loading converter…' : label, 0);
+      const blob = await engines[eng](f, pl, { signal, onProgress: p => ov(label, p) });
+      ov('Verifying…'); const url = URL.createObjectURL(blob);
+      if (await tryNative(url, aud)) { conv.set(f, { url, aud }); return ready(aud); }
+      URL.revokeObjectURL(url); last = new Error('Converted file still did not play');
+    } catch (err) { if (signal.aborted) break; last = err; console.warn(eng, err); }
+  }
+  throw signal.aborted ? new Error('Cancelled') : last || new Error('Conversion failed');
 }
 
-// ---------- controls + A-B loop ----------
-const dur = () => V.duration || 0;
-const pct = t => (t / dur() * 100) + '%';
-function clearLoop() { A = B = null; drawLoop(); }
-function drawLoop() {
-  $('mA').style.display = A != null ? 'block' : 'none'; $('mB').style.display = B != null ? 'block' : 'none';
-  if (A != null) $('mA').style.left = pct(A); if (B != null) $('mB').style.left = pct(B);
-  const on = A != null && B != null; $('loop').style.display = on ? 'block' : 'none';
-  if (on) { $('loop').style.left = pct(A); $('loop').style.width = pct(B - A); }
-  $('setA').classList.toggle('on', A != null); $('setB').classList.toggle('on', B != null);
+async function play(i) {
+  if (i < 0 || i >= q.length) return;
+  ac?.abort(); const my = ++tok; cur = i; live = false; render();
+  P.pause(); destroyStream(); V.removeAttribute('src'); V.load(); IMG.removeAttribute('src');
+  try { await load(q[i], my); }
+  catch (err) { if (my !== tok) return; ov(); live = false; toast('⚠ ' + q[i].name + ': ' + err.message); if (err.message !== 'Cancelled' && i < q.length - 1) setTimeout(() => my === tok && play(i + 1), 2500); }
 }
-$('setA').onclick = () => { A = V.currentTime; if (B != null && B <= A) B = null; drawLoop(); };
-$('setB').onclick = () => { if (A == null) A = 0; if (V.currentTime > A) { B = V.currentTime; drawLoop(); } else toast('Loop end must come after the start.'); };
-$('clr').onclick = clearLoop;
-V.ontimeupdate = V.onloadedmetadata = () => {
-  $('fill').style.width = pct(V.currentTime); $('time').textContent = `${fmt(V.currentTime)} / ${fmt(dur())}`;
-  if (V.buffered.length) $('buf').style.width = pct(V.buffered.end(V.buffered.length - 1)); drawLoop();
-};
-setInterval(() => { if (A != null && B != null && !V.paused && V.currentTime >= B) V.currentTime = A; }, 40);
-const seekTo = e => { const r = $('seek').getBoundingClientRect(); V.currentTime = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * dur(); };
-$('seek').onpointerdown = e => {
-  if (e.target.classList.contains('mk')) { const m = e.target === $('mA') ? 'A' : 'B';
-    const mv = ev => { const r = $('seek').getBoundingClientRect(), t = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * dur(); m === 'A' ? A = t : B = t; drawLoop(); };
-    addEventListener('pointermove', mv); addEventListener('pointerup', () => removeEventListener('pointermove', mv), {once: true}); return; }
-  seekTo(e); const mv = ev => seekTo(ev); addEventListener('pointermove', mv); addEventListener('pointerup', () => removeEventListener('pointermove', mv), {once: true});
-};
-const toggle = () => V.paused ? V.play() : V.pause();
-$('play').onclick = toggle; V.onclick = toggle;
-V.onplay = () => { $('play').textContent = '⏸'; document.body.classList.add('playing'); };
-V.onpause = () => $('play').textContent = '▶';
-V.onended = () => play(idx + 1);
-$('prev').onclick = () => play(idx - 1); $('next').onclick = () => play(idx + 1);
-$('rate').onchange = e => V.playbackRate = +e.target.value;
-$('vol').oninput = e => V.volume = +e.target.value;
-$('mute').onclick = () => { V.muted = !V.muted; $('mute').textContent = V.muted ? '🔇' : '🔊'; };
-$('pl').onclick = () => $('list').classList.toggle('open');
-$('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen();
-addEventListener('keydown', e => {
-  if (e.target.tagName === 'SELECT') return;
-  const k = e.key; if (k === ' ') { e.preventDefault(); toggle(); } else if (k === 'ArrowRight') V.currentTime += 5; else if (k === 'ArrowLeft') V.currentTime -= 5;
-  else if (k === 'f') $('fs').click(); else if (k === 'm') $('mute').click(); else if (k === 'a') $('setA').click(); else if (k === 'b') $('setB').click();
-});
+const next = () => shuf && q.length > 1 ? (cur + 1 + Math.random() * (q.length - 1) | 0) % q.length : cur + 1;
 
-// ---------- drag & drop ----------
-['dragenter', 'dragover'].forEach(t => addEventListener(t, e => { e.preventDefault(); document.body.classList.add('drag'); }));
-['dragleave', 'drop'].forEach(t => addEventListener(t, e => { e.preventDefault(); if (t === 'drop' || !e.relatedTarget) document.body.classList.remove('drag'); }));
-addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
-$('file').onchange = e => addFiles([...e.target.files]);
+// ---------- events ----------
+P.on('ended', () => { if (rep === 2) { V.currentTime = 0; P.play(); } else { const n = next(); n < q.length ? play(n) : rep === 1 && q.length && play(0); } });
+V.addEventListener('error', () => live && toast('Playback error: ' + (V.error?.message || 'decode failure')));
+$('#prev').onclick = () => V.currentTime > 3 ? V.currentTime = 0 : play(cur - 1);
+$('#next').onclick = () => play(next());
+$('#shuf').onclick = e => { shuf = !shuf; e.currentTarget.classList.toggle('a', shuf); };
+$('#rep').onclick = e => { rep = (rep + 1) % 3; e.currentTarget.classList.toggle('a', !!rep); e.currentTarget.textContent = rep === 2 ? '🔂' : '🔁'; e.currentTarget.title = 'Repeat: ' + ['off', 'all', 'one'][rep]; };
+$('#cancel').onclick = () => ac?.abort();
+$('#clr').onclick = () => { ac?.abort(); tok++; q = []; cur = -1; P.pause(); destroyStream(); V.removeAttribute('src'); V.load(); show(null); ov(); render(); };
+$('#open').onclick = () => $('#fi').click();
+$('#fi').onchange = e => { add(e.target.files); e.target.value = ''; };
+$('#urlf').onsubmit = e => { e.preventDefault(); const u = $('#url').value.trim(); if (!u) return; q.push({ name: base(u) || u, url: u }); $('#url').value = ''; play(q.length - 1); };
+document.addEventListener('keydown', e => { if (/INPUT|TEXTAREA/.test(e.target.tagName)) return; if (e.key === 'n') play(next()); else if (e.key === 'p') play(cur - 1); });
+['dragenter', 'dragover'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); $('#stage').classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); $('#stage').classList.remove('over'); }));
+document.addEventListener('drop', e => { if (e.dataTransfer.files.length) add(e.dataTransfer.files); });
+show(null);
