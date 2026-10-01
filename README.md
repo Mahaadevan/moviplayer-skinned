@@ -13,4 +13,4 @@ Drag-and-drop VLC-style player that runs entirely in the browser. Files never le
 Keys: space, ←/→, f, m, a, b.
 Not supported (for now ig): .iso/.ifo DVD menus, .rar, MIDI and tracker modules (.mid, .mod, .xm, .it…). These show an error popup.
 
-Not for me: to deploy, push this folder to a repo, then Settings → Pages → deploy from branch. Libraries load from jsDelivr.
+Note for me: to deploy, push this folder to a repo, then Settings → Pages → deploy from branch. Libraries load from jsDelivr.
