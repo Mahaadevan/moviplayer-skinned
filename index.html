@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Cone: a VLC-style media player that runs entirely in your browser. Drag, drop, play. Nothing is uploaded.">
+<meta name="theme-color" content="#120e1c">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 6 52 56H12z' fill='%23ff8a00'/%3E%3C/svg%3E">
 <title>Cone — local media player</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
 </head>
 <body>
@@ -16,7 +19,7 @@
   <div id="drop"><div class="cone">▲</div><h1>Drop media here</h1><p>or <label class="link">browse<input id="file" type="file" multiple hidden></label> · everything stays on your device</p></div>
   <div id="title" aria-live="polite"></div>
 </main>
-<aside id="list"><header>Playlist</header><ol id="items"></ol></aside>
+<aside id="list"><header><span>Playlist</span><button id="clearpl" type="button" title="Clear playlist">Clear</button></header><ol id="items"></ol></aside>
 <footer id="bar">
   <div id="seek"><div id="buf"></div><div id="fill"></div><div id="loop"></div><i id="mA" class="mk">A</i><i id="mB" class="mk">B</i></div>
   <div class="row">
@@ -26,13 +29,14 @@
     <button id="setA" title="Set loop start">A</button><button id="setB" title="Set loop end">B</button><button id="clr" title="Clear loop">✕ loop</button>
     <select id="rate"><option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>2</option></select>
     <button id="mute">🔊</button><input id="vol" type="range" min="0" max="1" step="0.01" value="1">
-    <button id="pl" title="Playlist">☰</button><button id="fs" title="Fullscreen (f)">⛶</button>
+    <button id="open" title="Open files">📂</button><button id="pl" title="Playlist">☰</button><button id="fs" title="Fullscreen (f)">⛶</button>
   </div>
 </footer>
 <div id="toasts"></div>
 <div id="modal" hidden><div class="card"><h2 id="mt"></h2><p id="mb"></p>
   <div id="prog" hidden><div class="pbar"><div id="pfill"></div></div><small id="ppct"></small><pre id="log"></pre></div>
   <div class="btns"><button id="no">No</button><button id="yes" class="pri">Yes, convert</button></div></div></div>
-<script type="module" src="app.js"></script>
+<script type="module" src="js/app.js"></script>
+<noscript><p style="position:fixed;top:40%;width:100%;text-align:center;color:#f4efe6">Cone needs JavaScript enabled.</p></noscript>
 </body>
 </html>

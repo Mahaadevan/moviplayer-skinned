@@ -235,7 +235,7 @@ async function addFiles(files) {
 
   // Case-insensitive basename index. Preserve the first file when two dropped
   // paths have the same basename rather than silently duplicating entries.
-  const byName = new Map();
+  const byName = new Map(queue.map(f => [f.name.toLowerCase(), f]));
   for (const file of media) {
     const key = file.name.toLowerCase();
     if (!byName.has(key)) byName.set(key, file);
@@ -276,26 +276,51 @@ async function addFiles(files) {
   const unique = [...new Set(out)].filter(file => !LISTS.has(ext(file.name)));
   if (!unique.length) return;
 
-  const wasEmpty = queue.length === 0;
+  const first = queue.length;
   queue.push(...unique);
   render();
-
-  if (idx < 0 || wasEmpty) {
-    await play(wasEmpty ? 0 : queue.length - unique.length);
-  }
+  await play(first); // a new drop/open always starts playing; no reload needed
 }
 
 function render() {
   $('items').replaceChildren();
   queue.forEach((file, i) => {
     const li = document.createElement('li');
-    li.textContent = file.name;
+    const name = Object.assign(document.createElement('span'), { textContent: file.name });
+    const x = Object.assign(document.createElement('button'), { textContent: '✕', title: 'Remove', type: 'button' });
+    x.onclick = e => { e.stopPropagation(); removeAt(i); };
     li.className = i === idx ? 'cur' : '';
     li.title = file.name;
+    li.append(name, x);
     li.onclick = () => play(i);
     $('items').append(li);
   });
 }
+
+function stopAll() {
+  controller?.abort();
+  playToken++;
+  idx = -1;
+  closeModal();
+  clearCurrentSource();
+  resetMediaUI();
+  document.body.classList.remove('has', 'playing');
+  $('title').textContent = '';
+  $('play').textContent = '▶';
+}
+
+function removeAt(i) {
+  const [file] = queue.splice(i, 1);
+  cacheDelete(file);
+  if (i < idx) idx--;
+  else if (i === idx) {
+    if (queue.length) { idx = Math.min(i, queue.length - 1); play(idx); return; }
+    stopAll();
+  }
+  render();
+}
+
+$('clearpl').onclick = () => { for (const f of queue) cacheDelete(f); queue = []; stopAll(); render(); };
 
 // ---------- playback ----------
 
@@ -346,8 +371,30 @@ function resetMediaUI() {
 
 let live = false;
 
+let convertedPlaying = false;
+let health = null;
+
 V.onerror = () => {
-  if (live) toast(`Playback error: ${V.error?.message || 'decode failure'}`);
+  if (!live) return;
+  live = false;
+  if (convertedPlaying) toast(`Playback error: ${V.error?.message || 'decode failure'}`);
+  else play(idx, { force: true, reason: 'Playback failed while decoding.' });
+};
+
+// First 2 s of playback: catch black video (no frames decoded) or silent audio tracks.
+V.onplaying = () => {
+  const h = health;
+  if (!h || h.done || h.token !== playToken) return;
+  h.done = true;
+  setTimeout(() => {
+    if (h.token !== playToken || V.paused) return;
+    const noFrames = kind === 'video' && V.getVideoPlaybackQuality?.().totalVideoFrames === 0;
+    const bytes = V.webkitAudioDecodedByteCount;
+    const noAudio = h.audioSuspect && (typeof bytes === 'number' ? bytes === 0 : true);
+    if (noFrames || noAudio) {
+      play(idx, { force: true, reason: noFrames ? 'The video track could not be decoded.' : 'The audio track is not supported by this browser.' });
+    }
+  }, 2000);
 };
 
 function tryNative(source, audioOnly, myToken, signal) {
@@ -391,6 +438,8 @@ function ready(audioOnly, myToken, signal) {
   VIZ.style.display = audioOnly ? 'block' : 'none';
 
   if (audioOnly) startViz();
+  actx?.resume().catch(() => {});
+  V.playbackRate = Number($('rate').value) || 1;
 
   V.play().catch(err => {
     if (err.name === 'NotAllowedError') toast('Press play to start');
@@ -398,7 +447,7 @@ function ready(audioOnly, myToken, signal) {
   return true;
 }
 
-async function play(i) {
+async function play(i, opts = {}) {
   if (i < 0 || i >= queue.length) return;
 
   controller?.abort();
@@ -416,6 +465,7 @@ async function play(i) {
   const extension = ext(file.name);
 
   if (UNSUPPORTED[extension]) {
+    clearCurrentSource();
     document.body.classList.add('has');
     $('title').textContent = file.name;
     toast(`${file.name}: ${UNSUPPORTED[extension]}`);
@@ -435,27 +485,28 @@ async function play(i) {
   }
 
   try {
-    const converted = await load(file, extension, myToken, signal);
+    const converted = await load(file, extension, myToken, signal, opts);
     if (converted === false) return; // user explicitly declined conversion
   } catch (err) {
-    if (myToken !== playToken || signal.aborted) return;
-    closeModal();
+    if (myToken !== playToken) return;
+    closeModal(); // Cancel used to leave the modal stuck on screen
+    if (signal.aborted) { toast('Conversion cancelled'); return; }
     toast(err.message === 'Cancelled'
       ? 'Conversion cancelled'
       : `${file.name}: ${err.message || 'Playback failed'}`);
   }
 }
 
-async function load(file, extension, myToken, signal) {
+async function load(file, extension, myToken, signal, opts = {}) {
   const stale = () => {
     if (myToken !== playToken || signal.aborted) throw new Error('Cancelled');
   };
 
-  const cached = conv.get(file);
+  const cached = opts.force ? null : conv.get(file);
   if (cached) {
     const ok = await tryNative(cached.url, cached.audioOnly, myToken, signal);
     stale();
-    if (ok) return ready(cached.audioOnly, myToken, signal);
+    if (ok) { convertedPlaying = true; return ready(cached.audioOnly, myToken, signal); }
 
     cacheDelete(file);
   }
@@ -466,7 +517,7 @@ async function load(file, extension, myToken, signal) {
   try {
     probeResult = await Promise.race([
       probe(file, signal),
-      new Promise(resolve => setTimeout(() => resolve(null), 5000)),
+      new Promise(resolve => setTimeout(() => resolve(null), 3000)),
     ]);
   } catch (err) {
     if (signal.aborted) throw new Error('Cancelled');
@@ -479,18 +530,22 @@ async function load(file, extension, myToken, signal) {
     ? !probeResult.hasVideo
     : AUDIO.has(extension);
 
-  url = URL.createObjectURL(file);
-  const nativeOK = await tryNative(url, audioOnly, myToken, signal);
-  stale();
-
-  if (nativeOK && (!probeResult || probeResult.audioOk !== false) &&
-      (!probeResult?.hasVideo || probeResult.videoOk !== false)) {
-    return ready(audioOnly, myToken, signal);
+  if (!opts.force) {
+    url = URL.createObjectURL(file);
+    const nativeOK = await tryNative(url, audioOnly, myToken, signal);
+    stale();
+    if (nativeOK) {
+      // The browser's own decoder is the authority. WebCodecs support (probe) only
+      // hints that audio might be silent, which is verified once playback starts.
+      convertedPlaying = false;
+      health = { token: myToken, done: false, audioSuspect: !!probeResult?.hasAudio && probeResult.audioOk === false };
+      return ready(audioOnly, myToken, signal);
+    }
   }
 
   const wantsConversion = await askConversion(
     'This file needs conversion',
-    `${file.name} cannot be played directly by this browser. Convert it locally to ${audioOnly ? 'M4A (AAC)' : 'MP4 (H.264/AAC)'}?`,
+    `${opts.reason || file.name + ' cannot be played directly by this browser.'} Convert it locally to ${audioOnly ? 'M4A (AAC)' : 'MP4 (H.264/AAC)'}?${file.size > 1.5 * 2 ** 30 ? ' This file is large; the result is held in memory, so the browser may run out of memory.' : ''}`,
     signal
   );
   stale();
@@ -563,6 +618,7 @@ async function load(file, extension, myToken, signal) {
       if (plays) {
         cacheSet(file, { url: convertedURL, audioOnly });
         url = null; // Converted URL is now owned by the cache.
+        convertedPlaying = true;
         return ready(audioOnly, myToken, signal);
       }
 
@@ -781,6 +837,7 @@ $('seek').onpointerdown = event => {
 };
 
 const toggle = () => {
+  if (!V.currentSrc) return;
   if (V.paused) {
     V.play().catch(err => {
       if (err.name !== 'AbortError') toast('Playback could not start');
@@ -814,16 +871,21 @@ $('next').onclick = () => {
 
 $('rate').onchange = event => {
   V.playbackRate = Number(event.target.value) || 1;
+  event.target.blur(); // keep keyboard shortcuts working
 };
 
 $('vol').oninput = event => {
   V.volume = Math.min(1, Math.max(0, Number(event.target.value) || 0));
+  if (V.volume > 0) V.muted = false;
 };
+$('vol').onchange = event => event.target.blur();
+V.onvolumechange = () => { $('mute').textContent = V.muted || V.volume === 0 ? '🔇' : '🔊'; };
 
-$('mute').onclick = () => {
-  V.muted = !V.muted;
-  $('mute').textContent = V.muted ? '🔇' : '🔊';
-};
+$('mute').onclick = () => { V.muted = !V.muted; };
+$('open').onclick = () => $('file').click();
+addEventListener('pointerdown', () => actx?.resume().catch(() => {}), { capture: true });
+// Space on a focused button would click it on key-up and double-toggle playback.
+addEventListener('keyup', e => { if (e.key === ' ' && e.target?.tagName === 'BUTTON') e.preventDefault(); });
 
 $('pl').onclick = () => $('list').classList.toggle('open');
 
@@ -832,7 +894,7 @@ $('fs').onclick = async () => {
     if (document.fullscreenElement) {
       await document.exitFullscreen();
     } else {
-      await $('stage').requestFullscreen();
+      await document.documentElement.requestFullscreen();
     }
   } catch {
     toast('Fullscreen is not available in this browser.');
@@ -893,7 +955,9 @@ addEventListener('drop', event => {
 });
 
 $('file').onchange = event => {
-  addFiles([...event.target.files]).catch(err => {
+  const files = [...event.target.files];
+  event.target.value = ''; // lets the same file be picked again
+  addFiles(files).catch(err => {
     toast(err.message || 'Could not add files');
   });
 };

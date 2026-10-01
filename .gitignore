@@ -1,27 +1,29 @@
-# OS
+# OS / editors
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Editors
 .vscode/
 .idea/
 *.swp
 
-# Node (if add tooling later)
+# Tooling (if added later)
 node_modules/
-package-lock.json
 dist/
-
-# Logs and local env
 *.log
 .env
 
-# Test media: keep it out of the repo
+# Test media: GitHub rejects files over 100 MB
 *.mkv
 *.mp4
 *.avi
 *.mov
+*.wmv
+*.flv
+*.webm
 *.flac
 *.mp3
 *.wav
+*.ogg
+*.m4a
+*.iso
+*.rar

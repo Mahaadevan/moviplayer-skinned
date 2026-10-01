@@ -108,15 +108,13 @@ async function gpu(file, plan, o = {}) {
   const conversion = await M.Conversion.init({
     input,
     output,
-    tracks: 'primary',
-    video: plan.audioOnly
+    // Conversion has no `tracks` option; keep only the first video/audio track via per-track callbacks.
+    video: (_track, n) => plan.audioOnly || n > 1
       ? { discard: true }
-      : plan.v
-        ? { codec: 'avc', forceTranscode: true }
-        : {},
-    audio: plan.a
-      ? { codec: 'aac', forceTranscode: true }
-      : {},
+      : plan.v ? { codec: 'avc', forceTranscode: true } : {},
+    audio: (_track, n) => n > 1
+      ? { discard: true }
+      : plan.a ? { codec: 'aac', forceTranscode: true } : {},
   });
 
   throwIfCancelled(signal);
@@ -205,7 +203,7 @@ async function loadFF(signal) {
         await lib(`${CDN}@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js`);
       }
       if (!window.FFmpegUtil) {
-        await lib(`${CDN}@ffmpeg/util@0.12.2/dist/umd/index.js`);
+        await lib(`${CDN}@ffmpeg/util@0.12.1/dist/umd/index.js`);
       }
 
       const { toBlobURL } = window.FFmpegUtil;
@@ -228,8 +226,7 @@ async function loadFF(signal) {
         ),
       });
 
-      f.loaded = true;
-      FF = f;
+      FF = f; // `loaded` is a read-only getter on FFmpeg; assigning it threw and broke every conversion
       return f;
     } catch (err) {
       FF = null;
@@ -289,8 +286,11 @@ async function wasm(file, plan, o = {}) {
 
   const abortSignal = signal;
   const onAbort = () => {
-    // exec receives the signal below; this listener only wakes the watchdog.
-    bump();
+    // Rejecting exec() does not stop the worker, which would stay busy and block
+    // the next conversion. Kill it; the next run loads a fresh (cached) core.
+    watchdogAbort = false;
+    FF = null;
+    try { f.terminate(); } catch {}
   };
   abortSignal?.addEventListener('abort', onAbort, { once: true });
 
@@ -300,9 +300,11 @@ async function wasm(file, plan, o = {}) {
   try {
     await f.createDir('/in').catch(() => {});
 
+    // WORKERFS exposes each File under its own .name, so rename without copying data.
+    const mounted_file = new File([file], name, { type: '' });
     let src = `/in/${name}`;
     try {
-      await f.mount('WORKERFS', { files: [file] }, '/in');
+      await f.mount('WORKERFS', { files: [mounted_file] }, '/in');
       mounted = true;
     } catch {
       // Fallback for browsers/cores where WORKERFS is unavailable.
@@ -360,7 +362,7 @@ async function wasm(file, plan, o = {}) {
       throw new Error('ffmpeg produced an empty file');
     }
 
-    return new Blob([data.buffer ?? data], {
+    return new Blob([data], {
       type: plan.audioOnly ? 'audio/mp4' : 'video/mp4',
     });
   } catch (err) {

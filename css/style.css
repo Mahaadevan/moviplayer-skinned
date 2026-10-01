@@ -31,7 +31,7 @@ button.on{background:var(--ice);color:#06222a}
 input[type=range]{accent-color:var(--cone);width:90px}#time{color:var(--dim);font-variant-numeric:tabular-nums;margin-left:8px}
 #list{position:fixed;top:0;right:0;bottom:88px;width:280px;background:var(--glass);backdrop-filter:blur(14px);transform:translateX(100%);transition:.35s cubic-bezier(.2,.8,.2,1);overflow:auto}
 #list.open{transform:none}#list header{padding:16px;font-weight:700}#items{margin:0;padding:0 0 0 30px}
-#items li{padding:8px 12px 8px 4px;cursor:pointer;border-radius:8px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#items{list-style:none;padding:0 8px!important}#list header{display:flex;justify-content:space-between;align-items:center}#items li{display:flex;align-items:center;gap:6px;padding:8px 12px 8px 4px;cursor:pointer;border-radius:8px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #items li:hover,#items li.cur{color:var(--ink);background:#ffffff14}#items li.cur{color:var(--cone)}
 #toasts{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:30;display:grid;gap:8px}
 .toast{background:#3a1520;border:1px solid #ff5d73;padding:10px 16px;border-radius:12px;max-width:80vw;animation:drop .35s cubic-bezier(.2,1.4,.4,1);box-shadow:0 10px 30px #0008}
@@ -63,3 +63,4 @@ input[type=range]{accent-color:var(--cone);width:90px}#time{color:var(--dim);fon
   button,select{padding:6px 8px}
   #time{margin-left:3px;flex:1;text-align:center}
 }
+#items li span{flex:1;overflow:hidden;text-overflow:ellipsis}#items li button{padding:0 7px;opacity:0;border-radius:6px}#items li:hover button,#items li button:focus-visible{opacity:1}#clearpl{padding:3px 9px;font-size:12px}
