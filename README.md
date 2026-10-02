@@ -1,4 +1,4 @@
-# Cone
+# Cone (buggy)
 
 A VLC-style media player that runs entirely in your browser. Drag, drop, play. Files are never uploaded.
 
