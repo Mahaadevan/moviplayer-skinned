@@ -6,6 +6,4 @@ Custom drag-and-drop GUI ("Cone") over [movi-player](https://github.com/MrUjjwal
 
 **Keys:** space, ←/→, f, m, a, b, p, s, h, r (aspect), t (rotate), v (subtitles), n (audio track).
 
-**Deploy:** push, then Settings → Pages → deploy from `main`. No special headers needed.
-
 Notes: spectrum taps the page's Web Audio output; the unpinned-API surface of movi is used defensively, so bump the version in `app.js` deliberately.
