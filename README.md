@@ -1,4 +1,4 @@
-# Cone — movi-player skin
+# Cone — moviplayer skinned
 
 Custom drag-and-drop GUI ("Cone") over [movi-player](https://github.com/MrUjjwalG/movi-player) (Apache-2.0), loaded from jsDelivr (`movi-player@0.4.1`) — not forked or bundled. Playback uses movi's FFmpeg-WASM demuxer + WebCodecs (hardware first, software fallback) entirely in the browser; files never leave your device.
 
