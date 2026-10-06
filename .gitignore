@@ -1,29 +1,4 @@
-# OS / editors
 .DS_Store
 Thumbs.db
-desktop.ini
-.vscode/
-.idea/
-*.swp
-
-# Tooling (if added later)
 node_modules/
-dist/
 *.log
-.env
-
-# Test media: GitHub rejects files over 100 MB
-*.mkv
-*.mp4
-*.avi
-*.mov
-*.wmv
-*.flv
-*.webm
-*.flac
-*.mp3
-*.wav
-*.ogg
-*.m4a
-*.iso
-*.rar
