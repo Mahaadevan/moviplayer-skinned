@@ -3,29 +3,85 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111113">
 <title>Cone — local media player</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="bg"></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7.5 5.5h3.2v13H7.5zM13.3 5.5h3.2v13h-3.2z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6.5 6v12M18 6.5v11L9 12z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M17.5 6v12M6 6.5v11L15 12z"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a8 8 0 010 11"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></symbol>
+  <symbol id="i-fs" viewBox="0 0 24 24"><path d="M5 9V5h4M15 5h4v4M19 15v4h-4M9 19H5v-4"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/><circle cx="9" cy="8" r="1.8" fill="currentColor"/><circle cx="15" cy="12" r="1.8" fill="currentColor"/><circle cx="8" cy="16" r="1.8" fill="currentColor"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 7h10M9 12h10M9 17h10M5 7h.01M5 12h.01M5 17h.01"/></symbol>
+  <symbol id="i-aud" viewBox="0 0 24 24"><path d="M5 15v-3a7 7 0 0114 0v3"/><rect x="4" y="14" width="4" height="6" rx="1.5"/><rect x="16" y="14" width="4" height="6" rx="1.5"/></symbol>
+  <symbol id="i-cc" viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="2.5"/><path d="M10.5 10.5a2 2 0 100 3M16.5 10.5a2 2 0 100 3"/></symbol>
+  <symbol id="i-asp" viewBox="0 0 24 24"><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/><rect x="8.5" y="9" width="7" height="6" rx="1"/></symbol>
+  <symbol id="i-rot" viewBox="0 0 24 24"><path d="M19 12a7 7 0 11-2.1-5M19 4.5V8h-3.5"/></symbol>
+  <symbol id="i-hdr" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></symbol>
+  <symbol id="i-snap" viewBox="0 0 24 24"><path d="M4 8.5h3l1.5-2h7l1.5 2h3v10H4z"/><circle cx="12" cy="13" r="3.2"/></symbol>
+  <symbol id="i-pip" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><rect x="12" y="11.5" width="6.5" height="5" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></symbol>
+</defs></svg>
+
 <main id="stage">
   <movi-player id="video" nohotkeys noerrorscreen playsinline></movi-player>
   <canvas id="viz"></canvas>
-  <div id="drop"><div class="cone">▲</div><h1>Drop media here</h1><p>or <label class="link">browse<input id="file" type="file" accept="video/*,audio/*,.mkv,.ts,.m2ts,.flv,.avi,.wmv" multiple hidden></label> · <a class="link" id="url">open URL</a> · everything stays on your device</p></div>
+  <div id="drop">
+    <svg class="mark" viewBox="0 0 24 24"><path d="M12 3.5L4.5 20h15z"/></svg>
+    <h1>Drop a file to play</h1>
+    <p>Video or audio: MKV, MP4, WebM, HEVC, AV1 and most of what a browser normally refuses. It plays in this tab and nothing gets uploaded.</p>
+    <div class="acts">
+      <label class="btn pri">Choose file<input class="pick" type="file" multiple hidden></label>
+      <button class="btn openurl" type="button">Open URL</button>
+    </div>
+  </div>
   <div id="title"></div>
 </main>
-<aside id="list"><header>Playlist</header><ol id="items"></ol></aside>
+
+<aside id="list"><header>Queue</header><ol id="items"></ol></aside>
+
+<div id="tray" hidden>
+  <div class="trow"><span>Speed</span>
+    <select id="rate"><option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>2</option></select>
+  </div>
+  <div class="trow vrow"><button id="mute" class="ib" title="Mute (m)"><svg class="i s-vol"><use href="#i-vol"/></svg><svg class="i s-mute"><use href="#i-mute"/></svg></button><input id="vol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div>
+  <div class="grid">
+    <button id="aud" class="tb"><svg class="i"><use href="#i-aud"/></svg>Audio track</button>
+    <button id="sub" class="tb"><svg class="i"><use href="#i-cc"/></svg>Subtitles</button>
+    <button id="asp" class="tb"><svg class="i"><use href="#i-asp"/></svg>Aspect</button>
+    <button id="rot" class="tb"><svg class="i"><use href="#i-rot"/></svg>Rotate</button>
+    <button id="hdr" class="tb"><svg class="i"><use href="#i-hdr"/></svg>HDR</button>
+    <button id="snap" class="tb"><svg class="i"><use href="#i-snap"/></svg>Snapshot</button>
+    <button id="pip" class="tb"><svg class="i"><use href="#i-pip"/></svg>Pop out</button>
+    <button id="pl" class="tb"><svg class="i"><use href="#i-list"/></svg>Queue</button>
+    <label class="tb"><svg class="i"><use href="#i-add"/></svg>Add file<input class="pick" type="file" multiple hidden></label>
+    <button class="tb openurl" type="button"><svg class="i"><use href="#i-link"/></svg>Open URL</button>
+  </div>
+</div>
+
 <footer id="bar">
-  <div id="seek"><div id="buf"></div><div id="fill"></div><div id="loop"></div><i id="mA" class="mk">A</i><i id="mB" class="mk">B</i></div>
+  <div class="seekrow">
+    <span id="tcur">0:00</span>
+    <div id="seek"><div id="buf"></div><div id="fill"></div><div id="loop"></div><i id="mA" class="mk">A</i><i id="mB" class="mk">B</i></div>
+    <span id="tdur">0:00</span>
+  </div>
   <div class="row">
-    <button id="prev" title="Previous">⏮</button><button id="play" title="Play/Pause (space)">▶</button><button id="next" title="Next">⏭</button>
-    <span id="time">0:00 / 0:00</span>
+    <button id="prev" class="ib" title="Previous"><svg class="i"><use href="#i-prev"/></svg></button>
+    <button id="play" title="Play / pause (space)"><svg class="i s-play"><use href="#i-play"/></svg><svg class="i s-pause"><use href="#i-pause"/></svg></button>
+    <button id="next" class="ib" title="Next"><svg class="i"><use href="#i-next"/></svg></button>
     <span class="grow"></span>
-    <button id="setA" title="Set loop start (a)">A</button><button id="setB" title="Set loop end (b)">B</button><button id="clr" title="Clear loop">✕ loop</button>
-    <select id="rate" title="Speed"><option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>2</option></select>
-    <button id="aud" title="Audio track (n)">🎧</button><button id="sub" title="Subtitles (v)">CC</button><button id="asp" title="Aspect ratio (r)">▭</button><button id="rot" title="Rotate (t)">⟳</button><button id="hdr" title="HDR (h)">HDR</button><button id="snap" title="Snapshot (s)">📷</button><button id="pip" title="Picture-in-Picture (p)">⧉</button>
-    <button id="mute">🔊</button><input id="vol" type="range" min="0" max="1" step="0.01" value="1">
-    <button id="pl" title="Playlist">☰</button><button id="fs" title="Fullscreen (f)">⛶</button>
+    <div class="ab">
+      <button id="setA" title="Loop start (a)">A</button><button id="setB" title="Loop end (b)">B</button><button id="clr" title="Clear loop">&times;</button>
+    </div>
+    <span class="grow"></span>
+    <button id="tools" class="ib" title="More"><svg class="i"><use href="#i-more"/></svg></button>
+    <button id="fs" class="ib" title="Fullscreen (f)"><svg class="i"><use href="#i-fs"/></svg></button>
   </div>
 </footer>
 <div id="toasts"></div>
