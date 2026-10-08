@@ -9,6 +9,15 @@ const ext = n => n.split('.').pop().toLowerCase();
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
 let queue = [], idx = -1, A = null, B = null, an = null, raf = 0, aspIdx = 0, rotIdx = 0, rateIdx = 2;
 
+// ---------- drag & drop (registered synchronously, before any library loads) ----------
+let dc = 0;
+const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files');
+const endDrag = () => { dc = 0; document.body.classList.remove('drag'); };
+addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); dc++; document.body.classList.add('drag'); });
+addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+addEventListener('dragleave', e => { if (hasFiles(e) && --dc <= 0) endDrag(); });
+addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); const fs = [...e.dataTransfer.files]; endDrag(); addFiles(fs); });
+
 // ---------- spectrum tap: route every AudioContext destination connection through an analyser ----------
 const rawConnect = AudioNode.prototype.connect;
 AudioNode.prototype.connect = function (t, ...r) {
@@ -19,7 +28,9 @@ AudioNode.prototype.connect = function (t, ...r) {
   }
   return rawConnect.call(this, t, ...r);
 };
-const [, M] = await Promise.all([import(MOVI), import(MOTION).catch(() => null)]);
+let M = null;
+const lib = Promise.all([import(MOVI), customElements.whenDefined('movi-player'), import(MOTION).catch(() => null)]).then(([, , m]) => { M = m; initMotion(); });
+lib.catch(() => toast('Could not load the player library — check your connection'));
 const spring = {type: 'spring', stiffness: 420, damping: 30};
 const anim = (el, kf, o = spring) => M ? M.animate(el, kf, o) : null;
 
@@ -45,24 +56,29 @@ function toast(msg) {
   $('toasts').append(t); anim(t, {opacity: [0, 1], transform: ['translateY(-14px) scale(.96)', 'none']});
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, 3800);
 }
-function show(el, from) { if (!el.hidden) return; el.hidden = false; anim(el, {opacity: [0, 1], transform: [from, 'none']}); }
-function hide(el, to) { if (el.hidden) return; const a = anim(el, {opacity: 0, transform: to}, {type: 'spring', stiffness: 520, damping: 38}); a ? a.finished.then(() => { el.hidden = true; el.style.opacity = el.style.transform = ''; }) : (el.hidden = true); }
+const open = el => !!el._open;
+function setOpen(el, on, off) {
+  if (open(el) === on && (on || el.hidden)) return;
+  el._open = on; el._a?.stop?.();
+  if (on) { el.hidden = false; el.style.opacity = el.style.transform = ''; el._a = anim(el, {opacity: [0, 1], ...Object.fromEntries(Object.entries(off).map(([k, v]) => [k, [v, k === 'scale' ? 1 : 0]]))}); }
+  else { const a = el._a = anim(el, {opacity: 0, ...off}, {type: 'spring', stiffness: 520, damping: 38}); const done = () => { if (!el._open) { el.hidden = true; el.style.opacity = el.style.transform = ''; } }; a ? a.finished.then(done, done) : done(); }
+}
+const MORE_OFF = {y: 10, scale: .94}, LIST_OFF = {x: 32};
 const fmt = s => isFinite(s) ? (s >= 3600 ? Math.floor(s / 3600) + ':' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') : Math.floor(s / 60)) + ':' + String(Math.floor(s % 60)).padStart(2, '0') : '0:00';
 const dur = () => V.duration || 0;
 const pct = t => (dur() ? t / dur() * 100 : 0) + '%';
 new ResizeObserver(() => document.documentElement.style.setProperty('--barh', $('bar').offsetHeight + 'px')).observe($('bar'));
 
-// motion: entrance + hover / press springs
-if (M) {
-  M.animate('#drop > *', {opacity: [0, 1], transform: ['translateY(14px)', 'none']}, {delay: M.stagger(.07), type: 'spring', stiffness: 260, damping: 24});
-  M.hover('.ib, .chip', el => { M.animate(el, {scale: 1.1}, spring); return () => M.animate(el, {scale: 1}, spring); });
-  M.hover('#play', el => { M.animate(el, {scale: 1.08}, spring); return () => M.animate(el, {scale: 1}, spring); });
+function initMotion() {
+  if (!M) return;
+  M.animate('#drop > :not(.cone)', {opacity: [0, 1], y: [14, 0]}, {delay: M.stagger(.07), type: 'spring', stiffness: 260, damping: 24});
+  M.hover('.ib, .chip, #play', el => { M.animate(el, {scale: 1.1}, spring); return () => M.animate(el, {scale: 1}, spring); });
   M.press('button', el => { M.animate(el, {scale: .9}, {type: 'spring', stiffness: 600, damping: 28}); return () => M.animate(el, {scale: 1}, spring); });
 }
 
 // ---------- idle auto-hide ----------
 let idleT;
-const busy = () => !$('more').hidden || !$('list').hidden;
+const busy = () => open($('more')) || open($('list'));
 const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); if (!V.paused && !busy() && idx >= 0) idleT = setTimeout(() => document.body.classList.add('idle'), 2800); };
 ['pointermove', 'pointerdown', 'keydown', 'touchstart'].forEach(t => addEventListener(t, wake, {passive: true}));
 
@@ -82,15 +98,17 @@ const openUrl = e => { e?.preventDefault(); const u = prompt('Video / audio / HL
 $('url').onclick = openUrl; $('url2').onclick = openUrl;
 
 // ---------- playback ----------
-function play(i) {
+async function play(i) {
   if (i < 0 || i >= queue.length) return;
   idx = i; render(); clearLoop(); stopViz(); wake();
   const s = queue[i];
-  document.body.classList.add('has'); $('title').textContent = s.name || s;
+  document.body.classList.add('has'); document.body.classList.remove('idle'); $('title').textContent = s.name || s;
+  try { await lib; } catch { return; }
+  if (idx !== i) return;
   V.style.display = 'block'; V.src = s;
-  V.play?.().catch?.(err => { if (err?.name === 'NotAllowedError') toast('Press play to start'); });
+  try { await V.play(); } catch (err) { if (err?.name === 'NotAllowedError') toast('Press play to start'); }
 }
-const setPlay = p => { const b = $('play'); if (b.dataset.i === (p ? 'pause' : 'play')) return; b.dataset.i = p ? 'pause' : 'play'; ico(b, b.dataset.i); anim(b.firstChild, {transform: ['scale(.6) rotate(-30deg)', 'none'], opacity: [0, 1]}); wake(); };
+const setPlay = p => { const b = $('play'); if (b.dataset.i === (p ? 'pause' : 'play')) return; b.dataset.i = p ? 'pause' : 'play'; ico(b, b.dataset.i); anim(b.firstChild, {scale: [.6, 1], rotate: [-30, 0]}); wake(); };
 V.addEventListener('error', e => toast('Playback error: ' + (e.detail?.message || e.detail || 'unsupported or corrupt file')));
 V.addEventListener('loadeddata', () => { const ao = !V.videoWidth; V.style.display = ao ? 'none' : 'block'; ao ? startViz() : stopViz(); refreshBtns(); });
 V.addEventListener('trackschange', refreshBtns);
@@ -173,7 +191,7 @@ $('seek').addEventListener('pointerdown', e => {
 });
 
 // ---------- controls ----------
-const toggle = () => V.paused ? V.play() : V.pause();
+const toggle = () => { if (idx < 0) return $('file').click(); V.paused ? V.play() : V.pause(); };
 $('play').onclick = toggle;
 $('stage').onclick = e => {
   if (e.target.closest('#drop')) return;
@@ -186,9 +204,10 @@ $('rate').onclick = () => { rateIdx = (rateIdx + 1) % RATES.length; V.playbackRa
 $('vol').oninput = e => { V.volume = +e.target.value; V.muted = false; };
 $('mute').onclick = () => V.muted = !V.muted;
 $('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : (document.documentElement.requestFullscreen?.() || toast('Fullscreen unavailable'));
-function closeMenus() { hide($('more'), 'translateY(8px) scale(.96)'); hide($('list'), 'translateX(24px)'); wake(); }
-$('mo').onclick = () => { if ($('more').hidden) { hide($('list'), 'translateX(24px)'); show($('more'), 'translateY(10px) scale(.94)'); document.body.classList.remove('idle'); clearTimeout(idleT); } else closeMenus(); };
-$('pl').onclick = () => { if ($('list').hidden) { hide($('more'), 'translateY(8px) scale(.96)'); show($('list'), 'translateX(32px)'); render(); document.body.classList.remove('idle'); clearTimeout(idleT); } else closeMenus(); };
+function closeMenus() { setOpen($('more'), false, MORE_OFF); setOpen($('list'), false, LIST_OFF); wake(); }
+const pause = () => { document.body.classList.remove('idle'); clearTimeout(idleT); };
+$('mo').onclick = () => { if (open($('more'))) return closeMenus(); setOpen($('list'), false, LIST_OFF); setOpen($('more'), true, MORE_OFF); pause(); };
+$('pl').onclick = () => { if (open($('list'))) return closeMenus(); setOpen($('more'), false, MORE_OFF); render(); setOpen($('list'), true, LIST_OFF); pause(); };
 $('plx').onclick = closeMenus;
 
 // movi features: audio/subtitle tracks, aspect, rotate, HDR, snapshot, PiP
@@ -228,13 +247,5 @@ addEventListener('keydown', e => {
   else if (map[k]) $(map[k]).click();
 });
 
-// ---------- drag & drop ----------
-let dc = 0;
-const hasFiles = e => e.dataTransfer?.types?.includes('Files');
-const endDrag = () => { dc = 0; document.body.classList.remove('drag'); };
-addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); dc++; document.body.classList.add('drag'); });
-addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-addEventListener('dragleave', e => { if (hasFiles(e) && --dc <= 0) endDrag(); });
-addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); const fs = [...e.dataTransfer.files]; endDrag(); addFiles(fs); });
 $('file').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
 refreshBtns(); drawLoop();
