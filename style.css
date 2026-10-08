@@ -1,51 +1,99 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0b0b0c">
-<title>Cone</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<div class="bg"></div>
-<main id="stage">
-  <movi-player id="video" nohotkeys noerrorscreen playsinline></movi-player>
-  <canvas id="viz"></canvas>
-  <div id="drop"><div class="cone">▲</div><h1>Drop media here</h1><p>or <label class="link">browse<input id="file" type="file" accept="video/*,audio/*,.mkv,.ts,.m2ts,.flv,.avi,.wmv" multiple hidden></label> · <button class="link" id="url" type="button">open URL</button> · everything stays on your device</p></div>
-</main>
+:root{--bg:#0b0b0c;--ink:#f2f2f3;--dim:#8b8b92;--line:rgba(255,255,255,.09);--panel:rgba(22,22,24,.78);--acc:#ff7a1a;--r:16px;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;letter-spacing:-.01em;overflow:hidden;-webkit-font-smoothing:antialiased;user-select:none;-webkit-user-select:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;touch-action:manipulation}
+svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg .f{fill:currentColor;stroke:none}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:10px}
 
-<div id="ui">
-  <header id="top"><span id="title"></span><button class="ib" id="url2" data-i="link" title="Open URL" aria-label="Open URL"></button></header>
+#stage{position:fixed;inset:0;display:grid;place-items:center;z-index:1;touch-action:manipulation}
+movi-player{display:none;width:100%;height:100%}
+#viz{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}
 
-  <div id="more" hidden>
-    <button class="item" id="aud"><svg data-i="audio"></svg><span>Audio track</span><em id="audv"></em></button>
-    <button class="item" id="sub"><svg data-i="subs"></svg><span>Subtitles</span><em id="subv">Off</em></button>
-    <button class="item" id="asp"><svg data-i="aspect"></svg><span>Aspect</span><em id="aspv">contain</em></button>
-    <button class="item" id="rot"><svg data-i="rotate"></svg><span>Rotate</span><em id="rotv">0°</em></button>
-    <button class="item" id="hdr"><svg data-i="hdr"></svg><span>HDR</span><em id="hdrv">Off</em></button>
-    <button class="item" id="snap"><svg data-i="cam"></svg><span>Snapshot</span></button>
-    <button class="item" id="pip"><svg data-i="pip"></svg><span>Picture-in-Picture</span></button>
-  </div>
+/* stage: drifting backdrop + bobbing cone */
+.bg{position:fixed;inset:0;background:radial-gradient(60% 50% at 20% 20%,#3b1d5a55,transparent),radial-gradient(50% 50% at 80% 80%,#ff7a1a30,transparent);animation:drift 18s ease-in-out infinite alternate;pointer-events:none}
+@keyframes drift{to{transform:scale(1.25) translate(3%,-3%)}}
+#drop{text-align:center;padding:24px;transition:transform .3s var(--ease)}
+#drop .cone{font-size:64px;line-height:1.1;color:var(--acc);animation:bob 2.4s ease-in-out infinite;filter:drop-shadow(0 0 24px var(--acc))}
+@keyframes bob{50%{transform:translateY(-10px) rotate(-4deg)}}
+#drop h1{font-size:34px;font-weight:600;margin:.2em 0;letter-spacing:.2px}
+#drop p{color:var(--dim);margin:0}
+.link{color:var(--acc);cursor:pointer;text-decoration:underline;text-underline-offset:3px;font:inherit;display:inline}
+body.drag #drop{transform:scale(1.12)}
+body.drag::after{content:"";position:fixed;inset:14px;border:2px dashed var(--acc);border-radius:22px;animation:pulse 1s infinite;pointer-events:none;z-index:9}
+@keyframes pulse{50%{opacity:.35}}
+.has #drop,.has .bg{display:none}
 
-  <aside id="list" hidden><header><span>Queue</span><button class="ib" id="plx" data-i="x" aria-label="Close"></button></header><ol id="items"></ol></aside>
+/* overlay */
+#ui{position:fixed;inset:0;pointer-events:none;z-index:5}
+#ui>*{pointer-events:auto}
+#top{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 28px max(18px,env(safe-area-inset-left));background:linear-gradient(#000a,transparent);transition:opacity .35s var(--ease),transform .35s var(--ease)}
+#title{color:var(--ink);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.9}
+#bar{position:absolute;left:50%;bottom:max(14px,env(safe-area-inset-bottom));width:min(940px,calc(100% - 20px));transform:translateX(-50%);padding:16px 14px 10px;background:var(--panel);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 50px #0007;transition:opacity .35s var(--ease),transform .45s var(--ease)}
+.idle #bar{opacity:0;transform:translate(-50%,24px);pointer-events:none}
+.idle #top{opacity:0;transform:translateY(-12px);pointer-events:none}
+.idle{cursor:none}
 
-  <footer id="bar">
-    <div id="seek"><div id="buf"></div><div id="loop"></div><div id="fill"></div><i id="mA" class="mk">A</i><i id="mB" class="mk">B</i></div>
-    <div class="row">
-      <div class="grp"><button class="ib" id="prev" data-i="prev" title="Previous" aria-label="Previous"></button><button id="play" data-i="play" title="Play / Pause (space)" aria-label="Play"></button><button class="ib" id="next" data-i="next" title="Next" aria-label="Next"></button></div>
-      <span id="time">0:00 / 0:00</span>
-      <span class="grow"></span>
-      <div class="grp"><button class="chip" id="setA" title="Loop start (a)">A</button><button class="chip" id="setB" title="Loop end (b)">B</button><button class="ib" id="clr" data-i="x" title="Clear loop" aria-label="Clear loop" hidden></button></div>
-      <button class="chip" id="rate" title="Speed">1×</button>
-      <div class="grp vol"><button class="ib" id="mute" data-i="vol" title="Mute (m)" aria-label="Mute"></button><input id="vol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div>
-      <button class="ib" id="mo" data-i="more" title="More" aria-label="More"></button>
-      <button class="ib" id="pl" data-i="list" title="Queue" aria-label="Queue"></button>
-      <button class="ib" id="fs" data-i="full" title="Fullscreen (f)" aria-label="Fullscreen"></button>
-    </div>
-  </footer>
-</div>
-<div id="toasts"></div>
-<script type="module" src="app.js"></script>
-</body>
-</html>
+/* seek + A-B loop (large touch targets, no scroll hijack) */
+#seek{position:relative;height:4px;margin:14px 8px 12px;border-radius:4px;background:rgba(255,255,255,.14);cursor:pointer;touch-action:none;transition:height .2s var(--ease)}
+#seek::before{content:"";position:absolute;left:-8px;right:-8px;top:-18px;bottom:-14px}
+#seek:hover,#seek:active{height:6px}
+#buf,#fill,#loop{position:absolute;top:0;bottom:0;left:0;border-radius:inherit;pointer-events:none}
+#buf{background:rgba(255,255,255,.14);width:0}
+#fill{background:var(--ink);width:0}
+#fill::after{content:"";position:absolute;right:-6px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0008;transform:scale(0);transition:transform .2s var(--ease)}
+#seek:hover #fill::after,#seek:active #fill::after{transform:scale(1)}
+#loop{display:none;background:color-mix(in srgb,var(--acc) 55%,transparent);border-inline:2px solid var(--acc);border-radius:2px}
+.mk{position:absolute;top:-30px;transform:translateX(-50%);min-width:26px;height:22px;padding:0 8px;display:none;align-items:center;justify-content:center;font:600 11px/1 ui-sans-serif,system-ui,sans-serif;font-style:normal;color:#160a00;background:var(--acc);border-radius:7px;cursor:ew-resize;touch-action:none;z-index:2}
+.mk::after{content:"";position:absolute;left:50%;top:100%;width:2px;height:20px;margin-left:-1px;background:var(--acc)}
+@media(pointer:coarse){#seek{height:6px}.mk{height:28px;min-width:34px;top:-36px}.mk::after{height:24px}}
+
+/* controls */
+.row{display:flex;align-items:center;gap:4px;flex-wrap:nowrap}
+.grow{flex:1}
+.grp{display:flex;align-items:center;gap:2px}
+.ib{width:38px;height:38px;display:grid;place-items:center;border-radius:50%;color:var(--ink);opacity:.82;transition:background .2s,opacity .2s}
+.ib:hover{background:rgba(255,255,255,.1);opacity:1}
+#play{width:44px;height:44px;display:grid;place-items:center;border-radius:50%;background:var(--ink);color:#0b0b0c;margin:0 4px}
+#play svg{width:18px;height:18px}
+.chip{min-width:34px;height:30px;padding:0 10px;border-radius:999px;font-weight:600;font-size:12px;color:var(--dim);border:1px solid var(--line);transition:background .2s,color .2s,border-color .2s}
+.chip:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#160a00}
+#rate{margin:0 4px}
+#time{color:var(--dim);font-variant-numeric:tabular-nums;margin-left:10px;white-space:nowrap}
+input[type=range]{-webkit-appearance:none;appearance:none;width:84px;height:4px;border-radius:4px;background:rgba(255,255,255,.18);outline-offset:6px;margin:0 8px 0 2px;touch-action:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;border:0}
+input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#fff;border:0}
+
+/* popover + queue */
+#more{position:absolute;right:max(14px,env(safe-area-inset-right));bottom:calc(max(14px,env(safe-area-inset-bottom)) + var(--barh,84px) + 10px);width:min(280px,calc(100% - 28px));padding:6px;background:var(--panel);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 20px 50px #0007;transform-origin:bottom right}
+.item{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:11px;text-align:left;transition:background .15s}
+.item:hover{background:rgba(255,255,255,.08)}
+.item span{flex:1}.item em{font-style:normal;color:var(--dim);font-size:12px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item.on svg,.item.on em{color:var(--acc)}
+#list{position:absolute;top:0;right:0;bottom:0;width:min(320px,86vw);background:var(--panel);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-left:1px solid var(--line);overflow:auto;padding-top:env(safe-area-inset-top)}
+#list header{display:flex;align-items:center;justify-content:space-between;padding:14px 12px 8px 18px;font-weight:600}
+#items{margin:0;padding:0 8px 24px;list-style:none;counter-reset:q}
+#items li{counter-increment:q;display:flex;gap:12px;padding:10px;border-radius:10px;color:var(--dim);cursor:pointer;transition:background .15s,color .15s}
+#items li::before{content:counter(q);width:18px;text-align:right;font-variant-numeric:tabular-nums;opacity:.6}
+#items li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#items li:hover{background:rgba(255,255,255,.06);color:var(--ink)}#items li.cur{color:var(--acc)}
+
+/* toasts */
+#toasts{position:fixed;left:50%;top:max(16px,env(safe-area-inset-top));transform:translateX(-50%);z-index:30;display:grid;gap:8px;justify-items:center;pointer-events:none}
+.toast{background:var(--panel);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--line);padding:9px 16px;border-radius:999px;max-width:88vw;box-shadow:0 10px 30px #0006;transition:opacity .3s,transform .3s var(--ease)}
+.toast.out{opacity:0;transform:translateY(-8px)}
+
+@media(max-width:720px){
+  #bar{padding:14px 8px 8px;border-radius:20px}
+  .row{flex-wrap:wrap;row-gap:2px}
+  .grow{display:none}
+  #time{order:1;margin-left:auto}
+  .vol input{display:none}
+  .ib{width:40px;height:40px}
+  .row>.grp:first-child{order:0}
+  #mo{margin-left:auto}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+[hidden]{display:none!important}
