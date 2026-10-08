@@ -8,15 +8,11 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="bg"></div>
 <main id="stage">
   <movi-player id="video" nohotkeys noerrorscreen playsinline></movi-player>
   <canvas id="viz"></canvas>
-  <div id="drop">
-    <svg class="mark" viewBox="0 0 24 24" data-i="cone"></svg>
-    <h1>Drop a video or audio file</h1>
-    <p><label class="link">Browse files<input id="file" type="file" accept="video/*,audio/*,.mkv,.ts,.m2ts,.flv,.avi,.wmv" multiple hidden></label><i>·</i><button class="link" id="url" type="button">Open URL</button></p>
-    <small>MKV · HEVC · AV1 · HDR · stays on your device</small>
-  </div>
+  <div id="drop"><div class="cone">▲</div><h1>Drop media here</h1><p>or <label class="link">browse<input id="file" type="file" accept="video/*,audio/*,.mkv,.ts,.m2ts,.flv,.avi,.wmv" multiple hidden></label> · <button class="link" id="url" type="button">open URL</button> · everything stays on your device</p></div>
 </main>
 
 <div id="ui">
