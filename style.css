@@ -12,11 +12,7 @@ movi-player{display:none;width:100%;height:100%}
 #viz{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}
 
 /* stage: drifting backdrop + bobbing cone */
-.bg{position:fixed;inset:0;background:
-  radial-gradient(60% 50% at 20% 20%,#8a3dff80,transparent),
-  radial-gradient(50% 50% at 80% 80%,#ff7a1aaa,transparent),
-  radial-gradient(40% 40% at 70% 15%,#00e5ff40,transparent);
-  animation:drift 18s ease-in-out infinite alternate;pointer-events:none}
+.bg{position:fixed;inset:0;background:radial-gradient(60% 50% at 20% 20%,#3b1d5a55,transparent),radial-gradient(50% 50% at 80% 80%,#ff7a1a30,transparent);animation:drift 8s ease-in-out infinite alternate;pointer-events:none}
 
 #drop{text-align:center;padding:24px;transition:transform .3s var(--ease)}
 #drop .cone{font-size:64px;line-height:1.1;color:var(--acc);animation:bob 2.4s ease-in-out infinite;filter:drop-shadow(0 0 24px var(--acc))}
