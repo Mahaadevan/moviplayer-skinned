@@ -14,11 +14,16 @@ movi-player{display:none;width:100%;height:100%}
 /* stage: drifting backdrop + bobbing cone */
 .bg{position:fixed;inset:0;background:radial-gradient(60% 50% at 20% 20%,#3b1d5a55,transparent),radial-gradient(50% 50% at 80% 80%,#ff7a1a30,transparent);animation:drift 8s ease-in-out infinite alternate;pointer-events:none}
 
-#drop{text-align:center;padding:24px;transition:transform .3s var(--ease)}
+#drop{max-width:400px;padding:0 24px;text-align:left;transition:transform .3s var(--ease)}
 #drop .cone{font-size:64px;line-height:1.1;color:var(--acc);animation:bob 2.4s ease-in-out infinite;filter:drop-shadow(0 0 24px var(--acc))}
 @keyframes bob{50%{transform:translateY(-10px) rotate(-4deg)}}
 #drop h1{font-size:34px;font-weight:600;margin:.2em 0;letter-spacing:.2px}
-#drop p{color:var(--dim);margin:0}
+#drop p{color:var(--dim);margin:0 0 20px;font-size:14px}
+.acts{display:flex;gap:10px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:9px 16px;border:1px solid var(--line);border-radius:8px;background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.btn:hover{border-color:#44444b}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#1c1005;font-weight:600}
+
 .link{color:var(--acc);cursor:pointer;text-decoration:underline;text-underline-offset:3px;font:inherit;display:inline}
 body.drag #drop{transform:scale(1.12)}
 body.drag::after{content:"";position:fixed;inset:14px;border:2px dashed var(--acc);border-radius:22px;animation:pulse 1s infinite;pointer-events:none;z-index:9}
