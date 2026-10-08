@@ -7,23 +7,20 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 svg .f{fill:currentColor;stroke:none}
 :focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:10px}
 
-#stage{position:fixed;inset:0;display:grid;place-items:center;z-index:1;touch-action:manipulation}
+#stage{position:fixed;inset:0;display:grid;place-items:center;touch-action:manipulation}
 movi-player{display:none;width:100%;height:100%}
 #viz{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}
 
-/* stage: drifting backdrop + bobbing cone */
-.bg{position:fixed;inset:0;background:radial-gradient(60% 50% at 20% 20%,#3b1d5a55,transparent),radial-gradient(50% 50% at 80% 80%,#ff7a1a30,transparent);animation:drift 18s ease-in-out infinite alternate;pointer-events:none}
-@keyframes drift{to{transform:scale(1.25) translate(3%,-3%)}}
-#drop{text-align:center;padding:24px;transition:transform .3s var(--ease)}
-#drop .cone{font-size:64px;line-height:1.1;color:var(--acc);animation:bob 2.4s ease-in-out infinite;filter:drop-shadow(0 0 24px var(--acc))}
-@keyframes bob{50%{transform:translateY(-10px) rotate(-4deg)}}
-#drop h1{font-size:34px;font-weight:600;margin:.2em 0;letter-spacing:.2px}
-#drop p{color:var(--dim);margin:0}
-.link{color:var(--acc);cursor:pointer;text-decoration:underline;text-underline-offset:3px;font:inherit;display:inline}
-body.drag #drop{transform:scale(1.12)}
-body.drag::after{content:"";position:fixed;inset:14px;border:2px dashed var(--acc);border-radius:22px;animation:pulse 1s infinite;pointer-events:none;z-index:9}
-@keyframes pulse{50%{opacity:.35}}
-.has #drop,.has .bg{display:none}
+/* empty state */
+#drop{text-align:center;max-width:min(440px,86vw);padding:44px 32px;border:1px dashed var(--line);border-radius:28px;transition:border-color .25s,background .25s}
+#drop .mark{width:30px;height:30px;color:var(--acc);margin-bottom:18px}
+#drop h1{font-size:22px;font-weight:600;letter-spacing:-.025em;margin:0 0 10px}
+#drop p{margin:0 0 18px;color:var(--dim)}#drop p i{margin:0 10px;font-style:normal;opacity:.5}
+#drop small{color:var(--dim);opacity:.65;font-size:12px}
+.link{color:var(--ink);cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:4px;transition:text-decoration-color .2s}
+.link:hover{text-decoration-color:var(--ink)}
+body.drag #drop{border-color:var(--acc);background:rgba(255,122,26,.05)}
+.has #drop{display:none}
 
 /* overlay */
 #ui{position:fixed;inset:0;pointer-events:none;z-index:5}
