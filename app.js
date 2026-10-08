@@ -40,13 +40,12 @@ function addFiles(files) {
 }
 function render() {
   $('items').innerHTML = '';
-  queue.forEach((f, i) => { const li = Object.assign(document.createElement('li'), {textContent: f.name || f, className: i === idx ? 'cur' : ''}); li.onclick = () => play(i); $('items').append(li); });
+  queue.forEach((f, i) => { const li = Object.assign(document.createElement('li'), {textContent: f.name || f, className: i === idx ? 'cur' : ''}); li.onclick = () => { play(i); $('list').classList.remove('open'); $('pl').classList.remove('on'); }; $('items').append(li); });
 }
-$('url').onclick = e => {
-  e.preventDefault();
+document.querySelectorAll('.openurl').forEach(b => b.onclick = () => {
   const u = prompt('Video / audio / HLS (.m3u8) / DASH (.mpd) URL'); if (!u) return;
-  queue.push(u.trim()); const i = queue.length - 1; idx < 0 ? play(i) : (render(), play(i));
-};
+  closeTray(); queue.push(u.trim()); play(queue.length - 1);
+});
 
 // ---------- playback ----------
 function play(i) {
@@ -62,24 +61,39 @@ V.addEventListener('error', e => toast('Playback error: ' + (e.detail?.message |
 V.addEventListener('loadeddata', () => { const audioOnly = !V.videoWidth; V.style.display = audioOnly ? 'none' : 'block'; if (audioOnly) startViz(); else stopViz(); refreshBtns(); });
 V.addEventListener('trackschange', refreshBtns);
 V.addEventListener('ended', () => idx + 1 < queue.length && play(idx + 1));
-V.addEventListener('play', () => { $('play').textContent = '⏸'; document.body.classList.add('playing'); });
-V.addEventListener('pause', () => $('play').textContent = '▶');
-V.addEventListener('statechange', e => { if (e.detail === 'playing') $('play').textContent = '⏸'; else if (e.detail === 'paused') $('play').textContent = '▶'; });
-V.addEventListener('volumechange', () => $('mute').textContent = V.muted ? '🔇' : '🔊');
+const setPlaying = on => document.body.classList.toggle('playing-now', on);
+V.addEventListener('play', () => setPlaying(true));
+V.addEventListener('pause', () => setPlaying(false));
+V.addEventListener('statechange', e => { if (e.detail === 'playing') setPlaying(true); else if (e.detail === 'paused' || e.detail === 'ended') setPlaying(false); });
+V.addEventListener('volumechange', () => document.body.classList.toggle('is-muted', V.muted));
 V.addEventListener('pipchange', e => $('pip').classList.toggle('on', !!e.detail?.pip));
 
-// ---------- spectrum ----------
+// ---------- spectrum (cheap: canvas sized on resize only, no per-frame allocation or shadows) ----------
+const FRAME = 1000 / 120; let vw = 0, vh = 0, g, bins, last = 0, acc = 0; const lv = new Float32Array(48);
+function sizeViz() {
+  const r = Math.min(devicePixelRatio || 1, 1.5);
+  vw = VIZ.width = Math.round(VIZ.clientWidth * r); vh = VIZ.height = Math.round(VIZ.clientHeight * r);
+  g = VIZ.getContext('2d'); g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#f0883e';
+}
+new ResizeObserver(() => VIZ.style.display === 'block' && sizeViz()).observe($('stage'));
 function startViz() {
-  VIZ.style.display = 'block'; cancelAnimationFrame(raf);
-  const g = VIZ.getContext('2d');
-  (function draw() {
+  VIZ.style.display = 'block'; sizeViz(); cancelAnimationFrame(raf); last = performance.now(); acc = 0;
+  (function draw(t) {
     raf = requestAnimationFrame(draw);
-    const w = VIZ.width = VIZ.clientWidth, h = VIZ.height = VIZ.clientHeight;
-    if (!an) return;
-    const d = new Uint8Array(an.frequencyBinCount); an.getByteFrequencyData(d);
-    const n = 64, bw = w / n, gr = g.createLinearGradient(0, h, 0, 0); gr.addColorStop(0, '#ff8a00'); gr.addColorStop(1, '#5ee7ff');
-    g.fillStyle = gr; g.shadowColor = '#ff8a00'; g.shadowBlur = 14;
-    for (let i = 0; i < n; i++) { const v = d[Math.floor(i * d.length * .7 / n)] / 255, bh = Math.max(3, v * h * .6); g.fillRect(i * bw + 2, (h - bh) * .55, bw - 4, bh); g.globalAlpha = .18; g.fillRect(i * bw + 2, (h + bh) * .55, bw - 4, bh * .5); g.globalAlpha = 1; }
+    const dt = t - last; last = t; acc += dt;
+    if (acc < FRAME || !an || document.hidden) return; acc %= FRAME;   // cap at 120 fps (or the display's max if lower)
+    const k = Math.pow(.88, dt / 33);
+    bins ||= new Uint8Array(an.frequencyBinCount); an.getByteFrequencyData(bins);
+    g.clearRect(0, 0, vw, vh);
+    const n = 48, bw = vw / n, max = vh * .55, base = vh * .62;
+    g.beginPath();
+    for (let j = 0; j < n; j++) {
+      const v = bins[(j * bins.length * .75 / n) | 0] / 255;
+      lv[j] = v > lv[j] ? v : lv[j] * k + v * (1 - k);
+      const h = Math.max(2, lv[j] * max);
+      g.rect(j * bw + bw * .18, base - h, bw * .64, h);
+    }
+    g.fill();
   })();
 }
 function stopViz() { cancelAnimationFrame(raf); VIZ.style.display = 'none'; }
@@ -98,7 +112,7 @@ $('setA').onclick = () => { A = V.currentTime; if (B != null && B <= A) B = null
 $('setB').onclick = () => { if (A == null) A = 0; if (V.currentTime > A) { B = V.currentTime; drawLoop(); } else toast('Loop end must come after the start.'); };
 $('clr').onclick = clearLoop;
 V.addEventListener('timeupdate', () => {
-  $('fill').style.width = pct(V.currentTime); $('time').textContent = `${fmt(V.currentTime)} / ${fmt(dur())}`;
+  $('fill').style.width = pct(V.currentTime); $('tcur').textContent = fmt(V.currentTime); $('tdur').textContent = fmt(dur());
   try { const b = V.buffered; if (b?.length) $('buf').style.width = pct(b.end(b.length - 1)); } catch {}
   drawLoop();
 });
@@ -116,12 +130,18 @@ $('seek').addEventListener('pointerdown', e => {
 });
 const toggle = () => V.paused ? V.play() : V.pause();
 $('play').onclick = toggle; $('stage').onclick = e => { if (e.target.closest('#drop')) return; toggle(); };
+
+// tray
+const tray = $('tray'), closeTray = () => { tray.hidden = true; $('tools').classList.remove('on'); };
+$('tools').onclick = () => { tray.hidden = !tray.hidden; $('tools').classList.toggle('on', !tray.hidden); };
+addEventListener('pointerdown', e => { if (!tray.hidden && !e.target.closest('#tray, #tools')) closeTray(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') closeTray(); });
 $('prev').onclick = () => play(idx - 1); $('next').onclick = () => play(idx + 1);
 $('rate').onchange = e => V.playbackRate = +e.target.value;
 $('vol').oninput = e => V.volume = +e.target.value;
 $('mute').onclick = () => V.muted = !V.muted;
-$('pl').onclick = () => $('list').classList.toggle('open');
-$('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : $('stage').requestFullscreen();
+$('pl').onclick = () => { $('list').classList.toggle('open'); $('pl').classList.toggle('on'); closeTray(); };
+$('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.().catch(() => toast('Fullscreen unavailable here'));
 
 // movi features: audio/subtitle tracks, aspect, rotate, HDR, snapshot, PiP
 const P = () => V.player;
@@ -157,12 +177,18 @@ addEventListener('keydown', e => {
 });
 
 // ---------- drag & drop ----------
-let dc = 0;
+// Capture phase on window: movi's own handlers can't swallow the events.
+// The overlay clears itself shortly after dragover stops, so there is no enter/leave counter to drift.
 const hasFiles = e => e.dataTransfer?.types?.includes('Files');
-const endDrag = () => { dc = 0; document.body.classList.remove('drag'); };
-addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); dc++; document.body.classList.add('drag'); });
-addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-addEventListener('dragleave', e => { if (hasFiles(e) && --dc <= 0) endDrag(); });
-addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); const fs = [...e.dataTransfer.files]; endDrag(); addFiles(fs); });
-$('file').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+let dt;
+const endDrag = () => { clearTimeout(dt); document.body.classList.remove('drag'); };
+const eat = e => { e.preventDefault(); e.stopPropagation(); };
+addEventListener('dragenter', e => hasFiles(e) && eat(e), true);
+addEventListener('dragover', e => {
+  if (!hasFiles(e)) return; eat(e); e.dataTransfer.dropEffect = 'copy';
+  document.body.classList.add('drag'); clearTimeout(dt); dt = setTimeout(endDrag, 400);
+}, true);
+addEventListener('drop', e => { if (!hasFiles(e)) return; eat(e); const fs = [...e.dataTransfer.files]; endDrag(); addFiles(fs); }, true);
+addEventListener('dragend', endDrag, true);
+document.querySelectorAll('.pick').forEach(p => p.onchange = e => { addFiles([...e.target.files]); e.target.value = ''; closeTray(); });
 refreshBtns();
