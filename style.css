@@ -102,3 +102,74 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 [hidden]{display:none!important}
+
+/* ---------- ambient glow (movi ambientmode paints into #ambient) ---------- */
+#ambient{position:fixed;inset:-6%;z-index:0;pointer-events:none;opacity:0;transition:opacity .6s var(--ease);filter:saturate(1.8) brightness(1.6) blur(40px);
+  -webkit-mask-image:radial-gradient(ellipse closest-side at center,#000 70%,#0009 88%,transparent 100%);mask-image:radial-gradient(ellipse closest-side at center,#000 70%,#0009 88%,transparent 100%)}
+body.has.amb-on #ambient{opacity:.9}
+
+/* ---------- DEV switch (replaces the header link button) ---------- */
+.dev-mode-switch{display:inline-flex;align-items:center;gap:8px;padding:4px 10px 4px 8px;font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--dim);border-radius:999px;transition:color .18s var(--ease)}
+.dev-mode-switch:hover{color:var(--ink)}
+.dev-mode-switch .track{position:relative;width:30px;height:16px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid var(--line);transition:background .2s,border-color .2s}
+.dev-mode-switch .thumb{position:absolute;top:1px;left:1px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0004;transition:transform .2s var(--ease),background .2s,box-shadow .2s}
+.dev-mode-switch[aria-checked="true"]{color:var(--acc)}
+.dev-mode-switch[aria-checked="true"] .track{background:color-mix(in srgb,var(--acc) 35%,transparent);border-color:color-mix(in srgb,var(--acc) 60%,transparent)}
+.dev-mode-switch[aria-checked="true"] .thumb{transform:translateX(14px);background:var(--acc);box-shadow:0 0 8px var(--acc)}
+@media(max-width:600px){.dev-mode-switch .label{display:none}}
+
+/* ---------- developer console (from moviplayer.com, re-themed) ---------- */
+.dev-log-panel{display:none;position:fixed;left:50%;transform:translateX(-50%);z-index:6;width:min(940px,calc(100% - 20px));
+  bottom:calc(max(14px,env(safe-area-inset-bottom)) + var(--barh,84px) + 10px);background:var(--panel);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);
+  border:1px solid var(--line);border-radius:var(--r);box-shadow:0 20px 50px #0007;color:var(--ink);transition:opacity .35s var(--ease)}
+body.dev-mode .dev-log-panel{display:block}
+.idle .dev-log-panel{opacity:0;pointer-events:none}
+.dev-log-header{display:flex;align-items:center;flex-wrap:wrap;gap:.45rem;padding:.5rem .85rem;background:rgba(255,255,255,.03);border-radius:15px 15px 0 0;border-bottom:1px solid var(--line);font-size:.78rem;color:var(--dim)}
+.dev-log-header .dot{width:8px;height:8px;border-radius:50%;background:var(--acc);box-shadow:0 0 6px var(--acc)}
+.dev-log-header .title{font-weight:600;color:var(--ink)}
+.dev-log-header .count{font-variant-numeric:tabular-nums;opacity:.7}
+.dev-log-header .spacer{flex:1}
+.dev-log-header button{font-size:.72rem;padding:.2rem .55rem;border:1px solid var(--line);border-radius:6px;transition:background .15s,border-color .15s}
+.dev-log-header button:hover{background:rgba(255,255,255,.08);border-color:#44444b;color:var(--ink)}
+.dev-log-header button[aria-pressed="true"]{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 50%,transparent)}
+.dev-log-search{width:130px;appearance:none;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:6px;color:var(--ink);font:inherit;font-size:.72rem;padding:.2rem .5rem;transition:width .15s,border-color .15s;user-select:text;-webkit-user-select:text}
+.dev-log-search:focus{outline:none;width:200px;border-color:var(--acc)}
+.dev-log-levels{position:relative}
+.dev-log-levels>button{display:inline-flex;align-items:center;gap:.3rem}
+.dev-log-levels .caret{font-size:.6rem;opacity:.7}
+.dev-log-levels .menu{position:absolute;bottom:calc(100% + 6px);right:0;z-index:5;min-width:150px;padding:.25rem;background:#161618;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px #0008;color:var(--ink)}
+.dev-log-levels .menu label{display:flex;align-items:center;gap:.45rem;padding:.25rem .45rem;border-radius:5px;font-size:.72rem;cursor:pointer}
+.dev-log-levels .menu label:hover{background:rgba(255,255,255,.08)}
+.dev-log-levels .menu .sep{height:1px;margin:.25rem .2rem;background:var(--line)}
+.dev-log-levels .menu input{margin:0;accent-color:var(--acc)}
+.dev-log-body{max-height:min(240px,32vh);overflow-y:auto;padding:.4rem 0;font:.72rem/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;user-select:text;-webkit-user-select:text}
+.dev-log-row{display:flex;gap:.6rem;padding:.15rem .85rem;border-bottom:1px solid var(--line);white-space:pre-wrap;word-break:break-word}
+.dev-log-row:last-child{border-bottom:0}
+.dev-log-row .ts{flex:none;color:var(--dim);font-variant-numeric:tabular-nums}
+.dev-log-row .lvl{flex:0 0 44px;text-transform:uppercase;font-weight:600;letter-spacing:.04em}
+.dev-log-row .msg{flex:1 1 auto}
+.dev-log-row.log .lvl{color:#9aa4b1}.dev-log-row.info .lvl{color:#5ec6ff}.dev-log-row.warn .lvl,.dev-log-row.warn .msg{color:#f1c453}
+.dev-log-row.error .lvl{color:#ff6b6b}.dev-log-row.error .msg{color:#ff8e8e}.dev-log-row.debug .lvl{color:#b48cff}
+.dev-log-empty{padding:.9rem .85rem;color:var(--dim);font-style:italic}
+.credits{display:flex;gap:12px;align-items:flex-start;padding:10px 14px;border-top:1px solid var(--line);border-radius:0 0 15px 15px;background:linear-gradient(90deg,color-mix(in srgb,var(--acc) 10%,transparent),transparent);font-size:12px;color:var(--dim)}
+.credits p{margin:0;user-select:text;-webkit-user-select:text}.credits b{color:var(--ink)}
+.credits a{color:var(--acc);text-underline-offset:3px}
+.cone-mark{color:var(--acc);filter:drop-shadow(0 0 8px var(--acc));font-size:18px;line-height:1.2}
+
+/* ---------- quality submenu ---------- */
+#qmenu{position:absolute;right:max(14px,env(safe-area-inset-right));bottom:calc(max(14px,env(safe-area-inset-bottom)) + var(--barh,84px) + 10px);width:min(240px,calc(100% - 28px));max-height:50vh;overflow:auto;padding:6px;background:var(--panel);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 20px 50px #0007;z-index:3}
+#qmenu .item.cur{color:var(--acc)}#qmenu .item .tag{font-size:10px;font-weight:700;color:#160a00;background:var(--acc);border-radius:5px;padding:1px 5px}
+
+/* ---------- queue: add-more button + new-media highlight ---------- */
+#list{display:flex;flex-direction:column;overflow:hidden}
+#items{flex:1;overflow:auto}
+.addrow{position:sticky;bottom:0;padding:12px;background:linear-gradient(transparent,var(--panel) 30%);display:flex}
+.addmore{width:100%;gap:8px;cursor:pointer}
+.addmore svg{width:18px;height:18px}
+#items li.new{animation:newitem 2.4s var(--ease) both;color:var(--ink)}
+@keyframes newitem{0%{background:color-mix(in srgb,var(--acc) 45%,transparent);box-shadow:inset 3px 0 var(--acc)}70%{background:color-mix(in srgb,var(--acc) 22%,transparent);box-shadow:inset 3px 0 var(--acc)}100%{background:transparent;box-shadow:inset 0 0 transparent}}
+#subadd{cursor:pointer}
+/* queue floats above the control bar so "Add more media" is never covered */
+#list{bottom:calc(max(14px,env(safe-area-inset-bottom)) + var(--barh,84px) + 10px);border-bottom:1px solid var(--line);border-radius:0 0 0 var(--r)}
+@media(max-width:720px){#list{width:min(320px,92vw)}}
+.dev-log-panel{z-index:4}
