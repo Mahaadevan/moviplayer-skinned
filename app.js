@@ -289,7 +289,17 @@ $('qual').onclick = () => {
 V.addEventListener('qualitychange', () => { $('qualv').textContent = curQuality(); });
 
 // stable volume / crop black bars / ambient — thin wrappers over movi's own switches
+// Ambient box must match the picture's own aspect ratio, otherwise the box (fixed 16:9) leaves black bars
+// above/below (or left/right) of the video whenever the window or the video isn't 16:9.
+function setAR() {
+  let w = V.videoWidth, h = V.videoHeight;
+  if (!(w > 0 && h > 0)) { const t = (MP()?.getVideoTracks?.() || []).find(t => t.width > 0 && t.height > 0); if (t) { w = t.width; h = t.height; } }
+  let r = w > 0 && h > 0 ? w / h : 16 / 9;
+  if (rotIdx % 180 && 'rotate' in (customElements.get('movi-player')?.prototype || {})) r = 1 / r; // 90°/270° swaps the shape
+  document.body.style.setProperty('--arn', Math.min(Math.max(r, 0.4), 4).toFixed(4));
+}
 function syncToggles() {
+  setAR();
   const set = (id, vid, on) => { $(vid).textContent = on ? 'On' : 'Off'; $(id).classList.toggle('on', on); };
   set('stab', 'stabv', !!V.stableVolume); set('crop', 'cropv', !!V.cropbars);
   const vid = !!V.videoWidth; set('amb', 'ambv', !!V.ambientMode);
@@ -302,7 +312,7 @@ $('amb').onclick = () => { if (!V.videoWidth) return toast('Ambient mode applies
 V.addEventListener('volumechange', syncToggles);
 
 $('asp').onclick = () => { const m = ['contain', 'cover', 'fill', 'zoom']; V.objectFit = m[aspIdx = (aspIdx + 1) % m.length]; $('aspv').textContent = V.objectFit; };
-$('rot').onclick = () => { V.rotate = (rotIdx = (rotIdx + 90) % 360); $('rotv').textContent = rotIdx + '°'; };
+$('rot').onclick = () => { V.rotate = (rotIdx = (rotIdx + 90) % 360); $('rotv').textContent = rotIdx + '°'; setAR(); };
 $('snap').onclick = async () => {
   // Lossless: grab the decoded frame at its native resolution (no scaling, no overlay) and encode as PNG.
   // Falls back to the rendered canvas if the raw frame is unavailable.
