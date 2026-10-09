@@ -104,9 +104,8 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 [hidden]{display:none!important}
 
 /* ---------- ambient glow (movi ambientmode paints into #ambient) ---------- */
-#ambient{position:fixed;inset:-6%;z-index:0;pointer-events:none;opacity:0;transition:opacity .6s var(--ease);filter:saturate(1.8) brightness(1.6) blur(40px);
+#ambient{--movi-ambient-strength:2.4;position:fixed;inset:-8%;z-index:0;pointer-events:none;filter:saturate(1.8) brightness(2.2) blur(30px);
   -webkit-mask-image:radial-gradient(ellipse closest-side at center,#000 70%,#0009 88%,transparent 100%);mask-image:radial-gradient(ellipse closest-side at center,#000 70%,#0009 88%,transparent 100%)}
-body.has.amb-on #ambient{opacity:.9}
 
 /* ---------- DEV switch (replaces the header link button) ---------- */
 .dev-mode-switch{display:inline-flex;align-items:center;gap:8px;padding:4px 10px 4px 8px;font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--dim);border-radius:999px;transition:color .18s var(--ease)}
@@ -173,3 +172,12 @@ body.dev-mode .dev-log-panel{display:block}
 #list{bottom:calc(max(14px,env(safe-area-inset-bottom)) + var(--barh,84px) + 10px);border-bottom:1px solid var(--line);border-radius:0 0 0 var(--r)}
 @media(max-width:720px){#list{width:min(320px,92vw)}}
 .dev-log-panel{z-index:4}
+
+/* menus share the control bar's right edge */
+#more,#qmenu{right:calc((100% - min(940px,100% - 20px))/2)}
+
+/* ambient: windowed, the picture sits in a framed box so the glow can spill around it (as on moviplayer.com);
+   fullscreen, movi paints the colour into the letterbox bars itself */
+movi-player{transition:width .45s var(--ease),height .45s var(--ease),border-radius .45s var(--ease)}
+body.amb-on movi-player{width:min(86%,calc((100vh - 170px)*1.7778 + 0px));height:calc(100% - 170px);margin-top:-30px;border-radius:14px;overflow:hidden}
+html:fullscreen body.amb-on movi-player{width:100%;height:100%;margin:0;border-radius:0}
