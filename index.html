@@ -6,11 +6,26 @@
 <meta name="theme-color" content="#0b0b0c">
 <title>Cone</title>
 <link rel="stylesheet" href="style.css">
+<script>
+/* Dev console capture — adapted from moviplayer.com (movi-player by Ujjwal Gupta, Apache-2.0).
+   Buffers console.* and global errors early so the panel can show startup logs. */
+(function(){var buf=[],ls=[];
+function fmt(a){if(a instanceof Error)return a.stack||a.name+": "+a.message;if(typeof a==="string")return a;try{return JSON.stringify(a,function(k,v){if(typeof v==="bigint")return v+"n";if(v instanceof Element)return"<"+v.tagName.toLowerCase()+">";return v})}catch(e){return String(a)}}
+function push(l,args){var e={level:l,text:Array.prototype.map.call(args,fmt).join(" "),t:Date.now()};buf.push(e);for(var i=0;i<ls.length;i++){try{ls[i](e)}catch(x){}}}
+["log","info","warn","error","debug"].forEach(function(l){var o=console[l].bind(console);console[l]=function(){push(l,arguments);o.apply(null,arguments)}});
+addEventListener("error",function(e){push("error",[e.message+" @ "+(e.filename||"?")+":"+(e.lineno||0)])});
+addEventListener("unhandledrejection",function(e){var r=e.reason;push("error",["Unhandled rejection: "+(r&&(r.stack||r.message)?(r.stack||r.message):fmt(r))])});
+window.__moviDevLog={buffer:buf,subscribe:function(f){ls.push(f);return function(){var i=ls.indexOf(f);i>=0&&ls.splice(i,1)}},clear:function(){buf.length=0;for(var i=0;i<ls.length;i++){try{ls[i](null)}catch(x){}}}};
+function mk(l){return function(){push(l,arguments)}}var m=mk("log");["log","info","warn","error","debug"].forEach(function(l){m[l]=mk(l)});window.__movilog=m;
+})();
+</script>
+
 </head>
 <body>
 <div class="bg"></div>
+<div id="ambient" aria-hidden="true"></div>
 <main id="stage">
-  <movi-player id="video" nohotkeys noerrorscreen playsinline></movi-player>
+  <movi-player id="video" nohotkeys noerrorscreen playsinline ambientmode ambientwrapper="ambient"></movi-player>
   <canvas id="viz"></canvas>
   <div id="drop"><div class="cone">▲</div><h1>Drop media here</h1><p>Video or audio: MKV, MP4, WebM, HEVC, AV1 and most of what a browser normally refuses. It plays in this tab and nothing gets uploaded.</p>
     <div class="acts">
@@ -20,11 +35,16 @@
   </div></main>
 
 <div id="ui">
-  <header id="top"><span id="title"></span><button class="ib" id="url2" data-i="link" title="Open URL" aria-label="Open URL"></button></header>
+  <header id="top"><span id="title"></span><button type="button" id="dev-mode-switch" class="dev-mode-switch" role="switch" aria-checked="false" aria-label="Developer mode" title="Developer mode — console &amp; credits"><span class="label">DEV</span><span class="track" aria-hidden="true"><span class="thumb"></span></span></button></header>
 
   <div id="more" hidden>
     <button class="item" id="aud"><svg data-i="audio"></svg><span>Audio track</span><em id="audv"></em></button>
+    <button class="item" id="qual"><svg data-i="quality"></svg><span>Quality</span><em id="qualv">Auto</em></button>
+    <button class="item" id="stab"><svg data-i="stable"></svg><span>Stable volume</span><em id="stabv">Off</em></button>
+    <button class="item" id="crop"><svg data-i="crop"></svg><span>Crop black bars</span><em id="cropv">Off</em></button>
+    <button class="item" id="amb"><svg data-i="ambient"></svg><span>Ambient mode</span><em id="ambv">On</em></button>
     <button class="item" id="sub"><svg data-i="subs"></svg><span>Subtitles</span><em id="subv">Off</em></button>
+    <button class="item" id="subadd"><svg data-i="plus"></svg><span>Add subtitle file</span><input id="subfile" type="file" accept=".srt,.ass,.ssa,.vtt" hidden></button>
     <button class="item" id="asp"><svg data-i="aspect"></svg><span>Aspect</span><em id="aspv">contain</em></button>
     <button class="item" id="rot"><svg data-i="rotate"></svg><span>Rotate</span><em id="rotv">0°</em></button>
     <button class="item" id="hdr"><svg data-i="hdr"></svg><span>HDR</span><em id="hdrv">Off</em></button>
@@ -32,7 +52,9 @@
     <button class="item" id="pip"><svg data-i="pip"></svg><span>Picture-in-Picture</span></button>
   </div>
 
-  <aside id="list" hidden><header><span>Queue</span><button class="ib" id="plx" data-i="x" aria-label="Close"></button></header><ol id="items"></ol></aside>
+  <div id="qmenu" hidden></div>
+
+  <aside id="list" hidden><header><span>Queue</span><button class="ib" id="plx" data-i="x" aria-label="Close"></button></header><ol id="items"></ol><footer class="addrow"><label class="btn pri addmore"><svg data-i="plus"></svg>Add more media<input id="file2" type="file" accept="video/*,audio/*,.mkv,.ts,.m2ts,.flv,.avi,.wmv" multiple hidden></label></footer></aside>
 
   <footer id="bar">
     <div id="seek"><div id="buf"></div><div id="loop"></div><div id="fill"></div><i id="mA" class="mk">A</i><i id="mB" class="mk">B</i></div>
@@ -49,6 +71,34 @@
     </div>
   </footer>
 </div>
+
+<aside id="dev-log-panel" class="dev-log-panel" aria-label="Developer console">
+  <div class="dev-log-header">
+    <span class="dot" aria-hidden="true"></span><span class="title">Console</span><span class="count" id="dev-log-count">0</span><span class="spacer"></span>
+    <input type="search" class="dev-log-search" id="dev-log-search" placeholder="Filter…" aria-label="Filter log messages" autocomplete="off" spellcheck="false">
+    <div class="dev-log-levels" id="dev-log-levels">
+      <button type="button" id="dev-log-levels-btn" aria-haspopup="true" aria-expanded="false" title="Choose which levels to show"><span id="dev-log-levels-label">All levels</span><span class="caret" aria-hidden="true">▾</span></button>
+      <div class="menu" id="dev-log-levels-menu" hidden>
+        <label><input type="checkbox" data-level="log" checked><span>Log</span></label>
+        <label><input type="checkbox" data-level="info" checked><span>Info</span></label>
+        <label><input type="checkbox" data-level="warn" checked><span>Warnings</span></label>
+        <label><input type="checkbox" data-level="error" checked><span>Errors</span></label>
+        <label><input type="checkbox" data-level="debug" checked><span>Debug</span></label>
+        <div class="sep"></div>
+        <label><input type="checkbox" id="dev-log-levels-all" checked><span>All levels</span></label>
+      </div>
+    </div>
+    <button type="button" id="dev-log-autoscroll" aria-pressed="true" title="Toggle autoscroll">Autoscroll: on</button>
+    <button type="button" id="dev-log-copy" title="Copy logs to clipboard">Copy</button>
+    <button type="button" id="dev-log-download" title="Download logs as a .log file">Download</button>
+    <button type="button" id="dev-log-clear" title="Clear logs">Clear</button>
+  </div>
+  <div class="dev-log-body" id="dev-log-body" role="log" aria-live="polite"><div class="dev-log-empty" id="dev-log-empty">No logs yet.</div></div>
+  <div class="credits">
+    <span class="cone-mark">▲</span>
+    <p><b>Cone</b> is a skin over <a href="https://moviplayer.com/" target="_blank" rel="noopener">MoviPlayer</a> — built by <a href="https://github.com/MrUjjwalG" target="_blank" rel="noopener">Ujjwal Gupta</a> (<a href="https://github.com/MrUjjwalG/movi-player" target="_blank" rel="noopener">movi-player</a>, Apache-2.0). The FFmpeg-WASM demuxer, WebCodecs pipeline, ambient glow, stable volume, black-bar cropping and this developer console all originate in his work. Huge thanks and full credit to the original creator.</p>
+  </div>
+</aside>
 <div id="toasts"></div>
 <script type="module" src="app.js"></script>
 </body>
