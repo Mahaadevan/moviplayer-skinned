@@ -143,7 +143,6 @@ V.addEventListener('play', () => setPlay(true));
 V.addEventListener('pause', () => setPlay(false));
 V.addEventListener('statechange', e => { if (e.detail === 'playing') setPlay(true); else if (e.detail === 'paused') setPlay(false); });
 V.addEventListener('volumechange', () => { const b = $('mute'); b.dataset.i = V.muted || !V.volume ? 'mute' : 'vol'; ico(b, b.dataset.i); });
-V.addEventListener('pipchange', e => $('pip').classList.toggle('on', !!e.detail?.pip));
 
 // ---------- spectrum: rAF at display refresh rate, time-based smoothing, zero per-frame allocation ----------
 const g = VIZ.getContext('2d', {desynchronized: true});
@@ -295,6 +294,7 @@ function syncToggles() {
   set('stab', 'stabv', !!V.stableVolume); set('crop', 'cropv', !!V.cropbars);
   const vid = !!V.videoWidth; set('amb', 'ambv', !!V.ambientMode);
   document.body.classList.toggle('amb-on', !!V.ambientMode && vid);
+  
 }
 $('stab').onclick = () => { V.stableVolume = !V.stableVolume; syncToggles(); toast('Stable volume ' + (V.stableVolume ? 'on' : 'off')); };
 $('crop').onclick = () => { if (!V.videoWidth) return toast('Crop applies to video only'); V.cropbars = !V.cropbars; syncToggles(); toast(V.cropbars ? 'Black bars cropped' : 'Black bars kept'); };
@@ -303,17 +303,39 @@ V.addEventListener('volumechange', syncToggles);
 
 $('asp').onclick = () => { const m = ['contain', 'cover', 'fill', 'zoom']; V.objectFit = m[aspIdx = (aspIdx + 1) % m.length]; $('aspv').textContent = V.objectFit; };
 $('rot').onclick = () => { V.rotate = (rotIdx = (rotIdx + 90) % 360); $('rotv').textContent = rotIdx + '°'; };
-$('hdr').onclick = () => { V.hdr = !V.hdr; $('hdrv').textContent = V.hdr ? 'On' : 'Off'; $('hdr').classList.toggle('on', V.hdr); };
-$('snap').onclick = () => {
-  try { V.getCanvas().toBlob(b => { if (!b) return toast('Snapshot failed'); const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(b), download: `snapshot-${Date.now()}.png`}); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }); } catch { toast('Snapshot unavailable'); }
+$('snap').onclick = async () => {
+  // Lossless: grab the decoded frame at its native resolution (no scaling, no overlay) and encode as PNG.
+  // Falls back to the rendered canvas if the raw frame is unavailable.
+  if (!V.videoWidth) return toast('Snapshot applies to video only');
+  const toPng = c => new Promise(r => c.toBlob(r, 'image/png'));
+  let blob = null;
+  try {
+    const f = MP()?.getCurrentVideoFrame?.();
+    if (f) {
+      const el = f instanceof HTMLVideoElement, w = el ? f.videoWidth : f.displayWidth, h = el ? f.videoHeight : f.displayHeight;
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const x = c.getContext('2d', {colorSpace: 'srgb', alpha: false}); x.imageSmoothingEnabled = false; x.drawImage(f, 0, 0, w, h);
+      // reject an all-black readback (some GPUs return one) and fall through to the canvas path
+      const d = x.getImageData(0, 0, Math.min(w, 64), Math.min(h, 36)).data; let lit = false;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 8 || d[i + 1] > 8 || d[i + 2] > 8) { lit = true; break; }
+      if (lit) blob = await toPng(c);
+    }
+  } catch {}
+  if (!blob) { try { blob = await toPng(V.getCanvas()); } catch {} }
+  if (!blob) return toast('Snapshot failed');
+  const t = V.currentTime, p = n => String(Math.floor(n)).padStart(2, '0');
+  const name = `${(queue[idx]?.name || 'snapshot').replace(/\.[^.]+$/, '')}-${p(t / 3600)}-${p(t % 3600 / 60)}-${p(t % 60)}.png`;
+  const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(blob), download: name});
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  toast(`Snapshot saved (${V.videoWidth}×${V.videoHeight} PNG)`);
 };
-$('pip').onclick = () => V.requestPictureInPicture().catch(() => toast('Picture-in-Picture unavailable'));
 
+document.addEventListener('fullscreenchange', syncToggles);
 addEventListener('keydown', e => {
   const tg = e.target.tagName, k = e.key.toLowerCase();
   if (tg === 'INPUT' && e.target.type !== 'range') return;
   if (e.ctrlKey || e.metaKey || e.altKey || (tg === 'BUTTON' && (k === ' ' || k === 'enter')) || (tg === 'INPUT' && e.target.type === 'range' && k.startsWith('arrow'))) return;
-  const map = {f: 'fs', m: 'mute', a: 'setA', b: 'setB', p: 'pip', s: 'snap', h: 'hdr', r: 'asp', t: 'rot', v: 'sub', n: 'aud', l: 'clr', u: 'stab', c: 'crop', g: 'amb', q: 'qual', d: 'dev-mode-switch'};
+  const map = {f: 'fs', m: 'mute', a: 'setA', b: 'setB', s: 'snap', r: 'asp', t: 'rot', v: 'sub', n: 'aud', l: 'clr', u: 'stab', c: 'crop', g: 'amb', q: 'qual', d: 'dev-mode-switch'};
   if (k === ' ') { e.preventDefault(); toggle(); }
   else if (k === 'escape') closeMenus();
   else if (k === 'arrowright') V.currentTime += 5; else if (k === 'arrowleft') V.currentTime -= 5;
