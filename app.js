@@ -16,7 +16,7 @@ const endDrag = () => { dc = 0; document.body.classList.remove('drag'); };
 addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); dc++; document.body.classList.add('drag'); });
 addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
 addEventListener('dragleave', e => { if (hasFiles(e) && --dc <= 0) endDrag(); });
-addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); const fs = [...e.dataTransfer.files]; endDrag(); addFiles(fs); });
+addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); const fs = [...e.dataTransfer.files]; endDrag(); addFiles(fs, {dropped: true}); });
 
 // ---------- spectrum tap: route every AudioContext destination connection through an analyser ----------
 const rawConnect = AudioNode.prototype.connect;
@@ -44,6 +44,9 @@ const P = {
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   audio: '<path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h1a2 2 0 0 1 2 2zM3 15a2 2 0 0 0 2 2h1v-5H5a2 2 0 0 0-2 2z"/>',
   subs: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 14h4M15 14h2M7 10h2M13 10h4"/>', aspect: '<rect x="3" y="6" width="18" height="12" rx="2.5"/>', rotate: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', quality: '<rect x="2.75" y="4.25" width="18.5" height="13.5" rx="2.75"/><path d="M8.25 21h7.5M12 17.75V21"/>',
+  stable: '<rect x="2.75" y="4.75" width="18.5" height="14.5" rx="3"/><path d="M6.25 13.5v-3m3 5v-7m3 5.5v-4m3 6v-8m3 5.5v-3"/>', crop: '<path d="M6.25 3.25v13a1.5 1.5 0 0 0 1.5 1.5h13M17.75 20.75v-13a1.5 1.5 0 0 0-1.5-1.5h-13"/>',
+  ambient: '<circle cx="12" cy="12" r="4.25"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4m10.6 10.6 1.4 1.4M2.5 12h2m15 0h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
   hdr: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   cam: '<path d="M21 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2.5l1.5-2.5h6L17.5 7H19a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="3.5"/>', pip: '<rect x="2.5" y="4.5" width="19" height="14" rx="2.5"/><rect class="f" x="12" y="11" width="7" height="5" rx="1.2"/>'
 };
@@ -78,24 +81,47 @@ function initMotion() {
 
 // ---------- idle auto-hide ----------
 let idleT;
-const busy = () => open($('more')) || open($('list'));
-const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); if (!V.paused && !busy() && idx >= 0) idleT = setTimeout(() => document.body.classList.add('idle'), 2800); };
+const busy = () => open($('more')) || open($('list')) || open($('qmenu'));
+const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); if (!V.paused && !busy() && !document.body.classList.contains('dev-mode') && idx >= 0) idleT = setTimeout(() => document.body.classList.add('idle'), 2800); };
 ['pointermove', 'pointerdown', 'keydown', 'touchstart'].forEach(t => addEventListener(t, wake, {passive: true}));
 
 // ---------- intake ----------
-function addFiles(files) {
+const SUBS = ['srt', 'ass', 'ssa', 'vtt'];
+let fresh = new Set(), freshT = 0, autoOpened = false;
+function addFiles(files, {dropped = false} = {}) {
   const ok = [];
-  for (const f of files) MEDIA.includes(ext(f.name)) ? ok.push(f) : toast(`${f.name}: unsupported format`);
+  for (const f of files) {
+    if (SUBS.includes(ext(f.name))) { addSub(f); continue; }
+    MEDIA.includes(ext(f.name)) ? ok.push(f) : toast(`${f.name}: unsupported format`);
+  }
   if (!ok.length) return;
-  const start = queue.length; queue.push(...ok);
-  idx < 0 ? play(start) : render();
+  const start = queue.length, first = idx < 0; queue.push(...ok);
+  fresh = new Set(ok.map((_, i) => start + i));
+  clearTimeout(freshT); freshT = setTimeout(() => { fresh.clear(); document.querySelectorAll('#items li.new').forEach(l => l.classList.remove('new')); }, 2600);
+  first ? play(start) : render();
+  // dropped (or "add more") media: pop the queue open so the newcomers are visible, then tuck it away again
+  if (dropped || !first) showFresh(first && ok.length === 1);
+}
+function showFresh(skip) {
+  if (skip) return;
+  const was = open($('list'));
+  setOpen($('more'), false, MORE_OFF); closeQ(); render(); setOpen($('list'), true, LIST_OFF); pause();
+  $('items').querySelector('li.new')?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+  if (was) return;
+  autoOpened = true; clearTimeout(showFresh.t);
+  showFresh.t = setTimeout(() => { if (autoOpened && open($('list'))) closeMenus(); autoOpened = false; }, 3600);
+}
+$('list').addEventListener('pointerdown', () => { autoOpened = false; });
+async function addSub(f) {
+  if (idx < 0) return toast('Load a video first, then add subtitles');
+  try { await lib; const ok = await V.addSubtitleFile(f, f.name.replace(/\.[^.]+$/, '')); toast(ok ? `Subtitles loaded: ${f.name}` : 'Could not read subtitle file'); refreshBtns(); } catch { toast('Could not read subtitle file'); }
 }
 function render() {
   $('items').innerHTML = '';
-  queue.forEach((f, i) => { const li = document.createElement('li'); li.className = i === idx ? 'cur' : ''; li.innerHTML = '<span></span>'; li.firstChild.textContent = f.name || f; li.onclick = () => play(i); $('items').append(li); });
+  queue.forEach((f, i) => { const li = document.createElement('li'); li.className = (i === idx ? 'cur ' : '') + (fresh.has(i) ? 'new' : ''); li.innerHTML = '<span></span>'; li.firstChild.textContent = f.name || f; li.onclick = () => play(i); $('items').append(li); });
 }
 const openUrl = e => { e?.preventDefault(); const u = prompt('Video / audio / HLS (.m3u8) / DASH (.mpd) URL'); if (!u) return; queue.push(u.trim()); play(queue.length - 1); };
-$('url').onclick = openUrl; $('url2').onclick = openUrl;
+$('url').onclick = openUrl;
 
 // ---------- playback ----------
 async function play(i) {
@@ -204,31 +230,77 @@ $('rate').onclick = () => { rateIdx = (rateIdx + 1) % RATES.length; V.playbackRa
 $('vol').oninput = e => { V.volume = +e.target.value; V.muted = false; };
 $('mute').onclick = () => V.muted = !V.muted;
 $('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : (document.documentElement.requestFullscreen?.() || toast('Fullscreen unavailable'));
-function closeMenus() { setOpen($('more'), false, MORE_OFF); setOpen($('list'), false, LIST_OFF); wake(); }
+function closeQ() { setOpen($('qmenu'), false, MORE_OFF); }
+function closeMenus() { setOpen($('more'), false, MORE_OFF); setOpen($('list'), false, LIST_OFF); closeQ(); wake(); }
 const pause = () => { document.body.classList.remove('idle'); clearTimeout(idleT); };
-$('mo').onclick = () => { if (open($('more'))) return closeMenus(); setOpen($('list'), false, LIST_OFF); setOpen($('more'), true, MORE_OFF); pause(); };
-$('pl').onclick = () => { if (open($('list'))) return closeMenus(); setOpen($('more'), false, MORE_OFF); render(); setOpen($('list'), true, LIST_OFF); pause(); };
+$('mo').onclick = () => { if (open($('more'))) return closeMenus(); closeQ(); setOpen($('list'), false, LIST_OFF); setOpen($('more'), true, MORE_OFF); pause(); };
+$('pl').onclick = () => { if (open($('list'))) return closeMenus(); autoOpened = false; closeQ(); setOpen($('more'), false, MORE_OFF); render(); setOpen($('list'), true, LIST_OFF); pause(); };
 $('plx').onclick = closeMenus;
 
 // movi features: audio/subtitle tracks, aspect, rotate, HDR, snapshot, PiP
 const MP = () => V.player;
 const nm = t => t.label || t.language || t.lang || t.codec || ('#' + t.id);
+const act = (kind) => { try { return MP()?.trackManager?.['getActive' + kind + 'Track']?.() || null; } catch { return null; } };
 function refreshBtns() {
   try { const a = MP()?.getAudioTracks?.() || [], s = MP()?.getSubtitleTracks?.() || [];
-    $('aud').style.display = a.length > 1 ? '' : 'none'; $('sub').style.display = s.length ? '' : 'none';
-    const ca = a.find(t => t.active ?? t.selected ?? t.enabled); $('audv').textContent = ca ? nm(ca) : '';
+    $('aud').style.display = a.length > 1 ? '' : 'none';
+    const ca = act('Audio'); $('audv').textContent = ca ? nm(ca) : '';
+    const cs = act('Subtitle'); $('subv').textContent = cs ? nm(cs) : 'Off'; $('sub').classList.toggle('on', !!cs);
+    $('subadd').style.display = '';
+    $('qualv').textContent = curQuality();
   } catch {}
+  syncToggles();
 }
-function cycleTrack(get, set, label, valEl) {
+async function cycleTrack(get, sel, label, valEl) {
   try {
     const tr = MP()[get](); if (!tr.length) return toast('No ' + label + ' tracks');
-    const cur = tr.findIndex(t => t.active ?? t.selected ?? t.enabled);
+    const c = act(label === 'subtitle' ? 'Subtitle' : 'Audio'), cur = c ? tr.findIndex(t => t.id === c.id) : -1;
     const nxt = label === 'subtitle' ? (cur + 1 >= tr.length ? null : tr[cur + 1]) : tr[(cur + 1) % tr.length];
-    MP()[set](nxt ? nxt.id : null); const v = nxt ? nm(nxt) : 'Off'; $(valEl).textContent = v; $(valEl).parentElement.classList.toggle('on', !!nxt && label === 'subtitle'); toast(`${label[0].toUpperCase() + label.slice(1)}: ${v}`);
+    await MP()[sel](nxt ? nxt.id : null); const v = nxt ? nm(nxt) : 'Off'; $(valEl).textContent = v; $(valEl).parentElement.classList.toggle('on', !!nxt && label === 'subtitle'); toast(`${label[0].toUpperCase() + label.slice(1)}: ${v}`);
   } catch { toast('Track switch failed'); }
 }
-$('aud').onclick = () => cycleTrack('getAudioTracks', 'setAudioTrack', 'audio', 'audv');
-$('sub').onclick = () => cycleTrack('getSubtitleTracks', 'setSubtitleTrack', 'subtitle', 'subv');
+$('aud').onclick = () => cycleTrack('getAudioTracks', 'selectAudioTrack', 'audio', 'audv');
+$('sub').onclick = () => (MP()?.getSubtitleTracks?.().length ? cycleTrack('getSubtitleTracks', 'selectSubtitleTrack', 'subtitle', 'subv') : toast('No embedded subtitles — add a .srt / .ass / .vtt file'));
+$('subadd').onclick = e => { if (e.target.id !== 'subfile') $('subfile').click(); };
+$('subfile').onchange = e => { [...e.target.files].forEach(addSub); e.target.value = ''; };
+
+// quality: adaptive (HLS/DASH) rungs when the source has them, otherwise show what is playing
+const curQuality = () => { const h = V.videoHeight; const t = act('Video'); if (t && t.id === -1) return h ? `Auto · ${h}p` : 'Auto'; return h ? h + 'p' : '—'; };
+function qualityList() {
+  const tr = (MP()?.getVideoTracks?.() || []).filter(t => t.id === -1 || t.height > 0);
+  const seen = new Set(), out = [];
+  tr.sort((a, b) => a.id === -1 ? -1 : b.id === -1 ? 1 : (b.height - a.height) || ((b.bitRate || 0) - (a.bitRate || 0)));
+  for (const t of tr) { const l = t.id === -1 ? 'Auto' : t.label || t.height + 'p'; if (!seen.has(l)) { seen.add(l); out.push({t, l}); } }
+  return out;
+}
+const badge = h => h >= 4320 ? '8K' : h >= 2160 ? '4K' : h >= 720 ? 'HD' : '';
+$('qual').onclick = () => {
+  const list = qualityList();
+  if (list.length < 2) return toast(`Quality: ${curQuality()} — this source has a single quality`);
+  const a = act('Video'), q = $('qmenu'); q.innerHTML = '';
+  list.forEach(({t, l}) => {
+    const b = document.createElement('button'); b.className = 'item' + (a && a.id === t.id ? ' cur' : '');
+    const sp = document.createElement('span'); sp.textContent = l === 'Auto' && a?.id === -1 && V.videoHeight ? `Auto (${V.videoHeight}p)` : l; b.append(sp);
+    const bd = badge(t.height || 0); if (bd) b.insertAdjacentHTML('beforeend', `<em class="tag">${bd}</em>`);
+    b.onclick = e => { e.stopPropagation(); try { MP().trackManager.selectVideoTrack(t.id); } catch { toast('Quality switch failed'); } closeQ(); setOpen($('more'), false, MORE_OFF); $('qualv').textContent = l; toast('Quality: ' + l); wake(); };
+    q.append(b);
+  });
+  setOpen($('more'), false, MORE_OFF); setOpen($('qmenu'), true, MORE_OFF);
+};
+V.addEventListener('qualitychange', () => { $('qualv').textContent = curQuality(); });
+
+// stable volume / crop black bars / ambient — thin wrappers over movi's own switches
+function syncToggles() {
+  const set = (id, vid, on) => { $(vid).textContent = on ? 'On' : 'Off'; $(id).classList.toggle('on', on); };
+  set('stab', 'stabv', !!V.stableVolume); set('crop', 'cropv', !!V.cropbars);
+  const vid = !!V.videoWidth; set('amb', 'ambv', !!V.ambientMode);
+  document.body.classList.toggle('amb-on', !!V.ambientMode && vid);
+}
+$('stab').onclick = () => { V.stableVolume = !V.stableVolume; syncToggles(); toast('Stable volume ' + (V.stableVolume ? 'on' : 'off')); };
+$('crop').onclick = () => { if (!V.videoWidth) return toast('Crop applies to video only'); V.cropbars = !V.cropbars; syncToggles(); toast(V.cropbars ? 'Black bars cropped' : 'Black bars kept'); };
+$('amb').onclick = () => { if (!V.videoWidth) return toast('Ambient mode applies to video only'); V.ambientMode = !V.ambientMode; syncToggles(); toast('Ambient mode ' + (V.ambientMode ? 'on' : 'off')); };
+V.addEventListener('volumechange', syncToggles);
+
 $('asp').onclick = () => { const m = ['contain', 'cover', 'fill', 'zoom']; V.objectFit = m[aspIdx = (aspIdx + 1) % m.length]; $('aspv').textContent = V.objectFit; };
 $('rot').onclick = () => { V.rotate = (rotIdx = (rotIdx + 90) % 360); $('rotv').textContent = rotIdx + '°'; };
 $('hdr').onclick = () => { V.hdr = !V.hdr; $('hdrv').textContent = V.hdr ? 'On' : 'Off'; $('hdr').classList.toggle('on', V.hdr); };
@@ -239,8 +311,9 @@ $('pip').onclick = () => V.requestPictureInPicture().catch(() => toast('Picture-
 
 addEventListener('keydown', e => {
   const tg = e.target.tagName, k = e.key.toLowerCase();
+  if (tg === 'INPUT' && e.target.type !== 'range') return;
   if (e.ctrlKey || e.metaKey || e.altKey || (tg === 'BUTTON' && (k === ' ' || k === 'enter')) || (tg === 'INPUT' && e.target.type === 'range' && k.startsWith('arrow'))) return;
-  const map = {f: 'fs', m: 'mute', a: 'setA', b: 'setB', p: 'pip', s: 'snap', h: 'hdr', r: 'asp', t: 'rot', v: 'sub', n: 'aud', l: 'clr'};
+  const map = {f: 'fs', m: 'mute', a: 'setA', b: 'setB', p: 'pip', s: 'snap', h: 'hdr', r: 'asp', t: 'rot', v: 'sub', n: 'aud', l: 'clr', u: 'stab', c: 'crop', g: 'amb', q: 'qual', d: 'dev-mode-switch'};
   if (k === ' ') { e.preventDefault(); toggle(); }
   else if (k === 'escape') closeMenus();
   else if (k === 'arrowright') V.currentTime += 5; else if (k === 'arrowleft') V.currentTime -= 5;
@@ -248,4 +321,81 @@ addEventListener('keydown', e => {
 });
 
 $('file').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+$('file2').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
 refreshBtns(); drawLoop();
+
+// ---------- developer mode + console (ported from moviplayer.com — movi-player by Ujjwal Gupta, Apache-2.0) ----------
+const devSw = $('dev-mode-switch'), dBody = $('dev-log-body'), dEmpty = $('dev-log-empty'), dCount = $('dev-log-count'), dSearch = $('dev-log-search');
+const dLevelsBtn = $('dev-log-levels-btn'), dLevelsLabel = $('dev-log-levels-label'), dLevelsMenu = $('dev-log-levels-menu'), dLevelsAll = $('dev-log-levels-all');
+const LEVELS = ['log', 'info', 'warn', 'error', 'debug'], levelsOn = new Set(LEVELS), MAXROWS = 5000;
+let dAuto = true, dHydrated = false, dQuery = '', dShown = 0;
+const filtered = () => dQuery !== '' || levelsOn.size !== LEVELS.length;
+const matches = e => !!e && levelsOn.has(e.level) && (dQuery === '' || e.text.toLowerCase().includes(dQuery));
+const ts = t => { const d = new Date(t), p = (n, w = 2) => String(n).padStart(w, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`; };
+const dTotal = () => window.__moviDevLog?.buffer?.length ?? 0;
+const dUpdate = () => { dCount.textContent = filtered() ? `${dShown} / ${dTotal()}` : String(dTotal()); };
+function dRow(e) {
+  const r = document.createElement('div'); r.className = 'dev-log-row ' + e.level;
+  for (const [c, t] of [['ts', ts(e.t)], ['lvl', e.level], ['msg', e.text]]) { const s = document.createElement('span'); s.className = c; s.textContent = t; r.append(s); }
+  return r;
+}
+function dAppend(e) {
+  if (!e) return;
+  if (matches(e)) {
+    dShown++; if (dEmpty.parentNode === dBody) dEmpty.remove();
+    dBody.append(dRow(e));
+    while (dBody.childElementCount > MAXROWS) dBody.firstElementChild.remove();
+    if (dAuto) dBody.scrollTop = dBody.scrollHeight;
+  }
+  dUpdate();
+}
+function dClearDom() { dBody.innerHTML = ''; dShown = 0; dEmpty.textContent = 'No logs yet.'; dBody.append(dEmpty); dUpdate(); }
+function dRender() {
+  if (!dHydrated) return;
+  const m = (window.__moviDevLog?.buffer || []).filter(matches); dShown = m.length; dBody.innerHTML = '';
+  if (!m.length) { dEmpty.textContent = filtered() ? 'No logs match the filter.' : 'No logs yet.'; dBody.append(dEmpty); dUpdate(); return; }
+  const f = document.createDocumentFragment(); for (const e of m.slice(-MAXROWS)) f.append(dRow(e));
+  dBody.append(f); dUpdate(); if (dAuto) dBody.scrollTop = dBody.scrollHeight;
+}
+function dHydrate() { if (dHydrated || !window.__moviDevLog) return; dHydrated = true; dRender(); window.__moviDevLog.subscribe(e => e === null ? dClearDom() : dAppend(e)); }
+let st; dSearch.addEventListener('input', () => { clearTimeout(st); st = setTimeout(() => { dQuery = dSearch.value.trim().toLowerCase(); dRender(); }, 120); });
+const boxes = [...dLevelsMenu.querySelectorAll('input[data-level]')];
+function syncLevels() {
+  const n = levelsOn.size;
+  dLevelsLabel.textContent = n === LEVELS.length ? 'All levels' : n === 0 ? 'No levels' : n === 1 ? boxes.find(b => levelsOn.has(b.dataset.level)).nextElementSibling.textContent : `${n} levels`;
+  dLevelsAll.checked = n === LEVELS.length; dLevelsAll.indeterminate = n > 0 && n < LEVELS.length;
+}
+const openLevels = o => { dLevelsMenu.hidden = !o; dLevelsBtn.setAttribute('aria-expanded', String(o)); };
+dLevelsBtn.addEventListener('click', e => { e.stopPropagation(); openLevels(dLevelsMenu.hidden); });
+dLevelsMenu.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => openLevels(false));
+addEventListener('keydown', e => { if (e.key === 'Escape' && !dLevelsMenu.hidden) openLevels(false); });
+dLevelsMenu.addEventListener('change', e => {
+  const b = e.target;
+  if (b === dLevelsAll) { levelsOn.clear(); if (b.checked) LEVELS.forEach(l => levelsOn.add(l)); boxes.forEach(x => x.checked = b.checked); }
+  else if (b.dataset.level) { b.checked ? levelsOn.add(b.dataset.level) : levelsOn.delete(b.dataset.level); } else return;
+  syncLevels(); dRender();
+});
+syncLevels();
+const dText = () => (window.__moviDevLog?.buffer || []).filter(matches).map(e => `[${ts(e.t)}] ${e.level.toUpperCase()} ${e.text}`).join('\n');
+const dFile = () => { const s = queue[idx]; let n = s?.name || (typeof s === 'string' ? s.split(/[?#]/)[0].split('/').pop() : ''); n = (n || '').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_').trim(); return (n || 'cone') + '.log'; };
+$('dev-log-clear').onclick = () => window.__moviDevLog?.clear();
+$('dev-log-download').onclick = () => {
+  const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(new Blob([dText() + '\n'], {type: 'text/plain;charset=utf-8'})), download: dFile()});
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  const b = $('dev-log-download'), o = b.textContent; b.textContent = 'Saved!'; setTimeout(() => b.textContent = o, 1200);
+};
+$('dev-log-copy').onclick = async () => {
+  const b = $('dev-log-copy'), o = b.textContent, t = dText();
+  try { await navigator.clipboard.writeText(t); b.textContent = 'Copied!'; }
+  catch { try { const ta = Object.assign(document.createElement('textarea'), {value: t}); ta.style.cssText = 'position:fixed;opacity:0'; document.body.append(ta); ta.select(); document.execCommand('copy'); ta.remove(); b.textContent = 'Copied!'; } catch { b.textContent = 'Copy failed'; } }
+  setTimeout(() => b.textContent = o, 1200);
+};
+$('dev-log-autoscroll').onclick = e => { dAuto = !dAuto; e.currentTarget.setAttribute('aria-pressed', String(dAuto)); e.currentTarget.textContent = 'Autoscroll: ' + (dAuto ? 'on' : 'off'); if (dAuto) dBody.scrollTop = dBody.scrollHeight; };
+function applyDev(on) {
+  document.body.classList.toggle('dev-mode', on); devSw.setAttribute('aria-checked', String(on));
+  if (on) { dHydrate(); document.body.classList.remove('idle'); clearTimeout(idleT); } else wake();
+}
+let devOn = false; try { devOn = localStorage.getItem('cone-dev') === '1'; } catch {}
+applyDev(devOn);
+devSw.onclick = e => { e.stopPropagation(); devOn = !devOn; applyDev(devOn); try { localStorage.setItem('cone-dev', devOn ? '1' : '0'); } catch {} if (devOn) console.info('Cone dev console on — skin over movi-player by Ujjwal Gupta (moviplayer.com)'); };
