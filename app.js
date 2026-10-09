@@ -193,7 +193,7 @@ async function play(i) {
   document.body.classList.add('has'); document.body.classList.remove('idle'); $('title').textContent = s.name || s;
   try { await lib; } catch { return; }
   if (idx !== i) return;
-  V.style.display = 'block'; V.src = s;
+  V.style.display = 'block'; V.sw = 'auto'; V.src = s;
   try { await V.play(); } catch (err) { if (err?.name === 'NotAllowedError') toast('Press play to start'); }
 }
 const setPlay = p => { const b = $('play'); if (b.dataset.i === (p ? 'pause' : 'play')) return; b.dataset.i = p ? 'pause' : 'play'; ico(b, b.dataset.i); anim(b.firstChild, {scale: [.6, 1], rotate: [-30, 0]}); wake(); };
