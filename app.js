@@ -23,16 +23,10 @@ const rawConnect = AudioNode.prototype.connect;
 AudioNode.prototype.connect = function (t, ...r) {
   if (typeof AudioDestinationNode !== 'undefined' && t instanceof AudioDestinationNode && this !== t.context.__an) {
     const c = t.context;
-    if (!c.__an) { an = c.__an = c.createAnalyser(); an.fftSize = 4096; an.smoothingTimeConstant = 0; rawConnect.call(an, c.destination); }
+    if (!c.__an) { an = c.__an = c.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = .35; an.minDecibels = -85; an.maxDecibels = -20; rawConnect.call(an, c.destination); }
     return rawConnect.call(this, c.__an, ...r);
   }
   return rawConnect.call(this, t, ...r);
-};
-const rawDisconnect = AudioNode.prototype.disconnect;
-AudioNode.prototype.disconnect = function (...a) { // a node we re-routed into the analyser must disconnect from there
-  const t = a[0];
-  if (typeof AudioDestinationNode !== 'undefined' && t instanceof AudioDestinationNode && t.context.__an && this !== t.context.__an) a[0] = t.context.__an;
-  return rawDisconnect.apply(this, a);
 };
 let M = null;
 const lib = Promise.all([import(MOVI), customElements.whenDefined('movi-player'), import(MOTION).catch(() => null)]).then(([, , m]) => { M = m; initMotion(); });
@@ -50,7 +44,7 @@ const P = {
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   audio: '<path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h1a2 2 0 0 1 2 2zM3 15a2 2 0 0 0 2 2h1v-5H5a2 2 0 0 0-2 2z"/>',
   subs: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 14h4M15 14h2M7 10h2M13 10h4"/>', aspect: '<rect x="3" y="6" width="18" height="12" rx="2.5"/>', rotate: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>', quality: '<rect x="2.75" y="4.25" width="18.5" height="13.5" rx="2.75"/><path d="M8.25 21h7.5M12 17.75V21"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>', grip: '<circle class="f" cx="9" cy="6" r="1.4"/><circle class="f" cx="15" cy="6" r="1.4"/><circle class="f" cx="9" cy="12" r="1.4"/><circle class="f" cx="15" cy="12" r="1.4"/><circle class="f" cx="9" cy="18" r="1.4"/><circle class="f" cx="15" cy="18" r="1.4"/>', quality: '<rect x="2.75" y="4.25" width="18.5" height="13.5" rx="2.75"/><path d="M8.25 21h7.5M12 17.75V21"/>',
   stable: '<rect x="2.75" y="4.75" width="18.5" height="14.5" rx="3"/><path d="M6.25 13.5v-3m3 5v-7m3 5.5v-4m3 6v-8m3 5.5v-3"/>', crop: '<path d="M6.25 3.25v13a1.5 1.5 0 0 0 1.5 1.5h13M17.75 20.75v-13a1.5 1.5 0 0 0-1.5-1.5h-13"/>',
   ambient: '<circle cx="12" cy="12" r="4.25"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4m10.6 10.6 1.4 1.4M2.5 12h2m15 0h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
   hdr: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -122,9 +116,71 @@ async function addSub(f) {
   if (idx < 0) return toast('Load a video first, then add subtitles');
   try { await lib; const ok = await V.addSubtitleFile(f, f.name.replace(/\.[^.]+$/, '')); toast(ok ? `Subtitles loaded: ${f.name}` : 'Could not read subtitle file'); refreshBtns(); } catch { toast('Could not read subtitle file'); }
 }
+let askT = 0;
+function cancelAsk() { clearTimeout(askT); document.querySelectorAll('#items li.ask').forEach(l => l.classList.remove('ask')); }
+function removeAt(r) {
+  if (r < 0 || r >= queue.length) return;
+  const wasCur = r === idx;
+  queue.splice(r, 1); fresh.clear();
+  if (r < idx) idx--;
+  if (wasCur) {
+    if (queue.length) { idx = -1; play(Math.min(r, queue.length - 1)); return; }
+    idx = -1; clearLoop(); stopViz(); try { V.pause(); } catch {}
+    V.style.display = 'none'; document.body.classList.remove('has', 'idle'); $('title').textContent = ''; setPlay(false);
+  }
+  render();
+}
 function render() {
-  $('items').innerHTML = '';
-  queue.forEach((f, i) => { const li = document.createElement('li'); li.className = (i === idx ? 'cur ' : '') + (fresh.has(i) ? 'new' : ''); li.innerHTML = '<span></span>'; li.firstChild.textContent = f.name || f; li.onclick = () => play(i); $('items').append(li); });
+  clearTimeout(askT);
+  const ol = $('items'); ol.innerHTML = '';
+  queue.forEach((f, i) => {
+    const li = document.createElement('li'); li.className = (i === idx ? 'cur ' : '') + (fresh.has(i) ? 'new' : ''); li.dataset.i = i;
+    const gr = document.createElement('span'); gr.className = 'grip'; gr.title = 'Drag to reorder'; ico(gr, 'grip');
+    const lab = document.createElement('span'); lab.className = 'lab'; lab.textContent = f.name || f;
+    const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'rm'; rm.title = 'Remove from queue'; rm.setAttribute('aria-label', 'Remove from queue'); ico(rm, 'minus');
+    const cf = document.createElement('div'); cf.className = 'cf';
+    const yes = Object.assign(document.createElement('button'), {type: 'button', className: 'yes', textContent: 'Remove'});
+    const no = Object.assign(document.createElement('button'), {type: 'button', className: 'no', textContent: 'Cancel'});
+    cf.append(yes, no); li.append(gr, lab, rm, cf);
+    li.onclick = () => play(+li.dataset.i);
+    rm.onclick = e => { e.stopPropagation(); cancelAsk(); li.classList.add('ask'); askT = setTimeout(cancelAsk, 4000); };
+    yes.onclick = e => { e.stopPropagation(); removeAt(+li.dataset.i); };
+    no.onclick = e => { e.stopPropagation(); cancelAsk(); };
+    initDrag(li, gr);
+    ol.append(li);
+  });
+}
+// drag to reorder (pointer events: mouse, touch and pen). Siblings move, the dragged row only follows the pointer.
+function initDrag(li, grip) {
+  grip.addEventListener('click', e => e.stopPropagation());
+  grip.addEventListener('pointerdown', e => {
+    if (e.button) return;
+    e.preventDefault(); e.stopPropagation(); cancelAsk(); autoOpened = false;
+    const ol = $('items'), id = e.pointerId; let y = e.clientY, cy = e.clientY, sy = ol.scrollTop, r = 0;
+    li.classList.add('dragging'); document.body.classList.add('reordering');
+    const step = () => {
+      li.style.transform = `translateY(${cy - y + ol.scrollTop - sy}px)`;
+      const b = li.getBoundingClientRect(), c = b.top + b.height / 2, p = li.previousElementSibling, n = li.nextElementSibling;
+      if (p) { const pr = p.getBoundingClientRect(); if (c < pr.top + pr.height / 2) { ol.insertBefore(p, li.nextSibling); y -= pr.height; return step(); } }
+      if (n) { const nr = n.getBoundingClientRect(); if (c > nr.top + nr.height / 2) { ol.insertBefore(n, li); y += nr.height; return step(); } }
+    };
+    const loop = () => {
+      const b = ol.getBoundingClientRect();
+      if (cy < b.top + 40) ol.scrollTop -= 10; else if (cy > b.bottom - 40) ol.scrollTop += 10;
+      step(); r = requestAnimationFrame(loop);
+    };
+    const mv = ev => { if (ev.pointerId === id) cy = ev.clientY; };
+    const end = ev => {
+      if (ev.pointerId !== id) return;
+      cancelAnimationFrame(r); removeEventListener('pointermove', mv); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+      li.style.transform = ''; li.classList.remove('dragging'); document.body.classList.remove('reordering');
+      const order = [...ol.children].map(l => +l.dataset.i);
+      if (order.some((v, i) => v !== i)) { queue = order.map(i => queue[i]); if (idx >= 0) idx = order.indexOf(idx); fresh.clear(); }
+      render();
+    };
+    addEventListener('pointermove', mv); addEventListener('pointerup', end); addEventListener('pointercancel', end);
+    r = requestAnimationFrame(loop);
+  });
 }
 const openUrl = e => { e?.preventDefault(); const u = prompt('Video / audio / HLS (.m3u8) / DASH (.mpd) URL'); if (!u) return; queue.push(u.trim()); play(queue.length - 1); };
 $('url').onclick = openUrl;
@@ -150,130 +206,72 @@ V.addEventListener('pause', () => setPlay(false));
 V.addEventListener('statechange', e => { if (e.detail === 'playing') setPlay(true); else if (e.detail === 'paused') setPlay(false); });
 V.addEventListener('volumechange', () => { const b = $('mute'); b.dataset.i = V.muted || !V.volume ? 'mute' : 'vol'; ico(b, b.dataset.i); });
 
-// ---------- spectrum: NCS-style ring, drawn in ASCII ----------
-// The analysis follows cava's pipeline (karlstav/cava, MIT): log-spaced bands -> band average x frequency eq ->
-// gravity falloff + integral smoothing (noise_reduction 0.77) -> monstercat neighbour filter (1.5) -> auto-sensitivity.
-// The ring is mirrored around the vertical axis (bass at the bottom, treble at the top), drawn as glyphs on a character
-// grid, and "kicks" on the bass; the cone logo sits in the middle.
+// ---------- spectrum: NCS-style mirrored bars, rAF at the display's refresh rate, time-based smoothing ----------
+// Resizing never restarts it: the loop keeps running, bar state survives (it is resampled if the bar count changes),
+// and the canvas is only re-sized inside the frame that draws it, so there is no blank or stuttering frame.
 const g = VIZ.getContext('2d', {desynchronized: true});
-const COLS = ['#5b2a10', '#a34a12', '#ff7a1a', '#ff9d4d', '#ffc791', '#ffffff'];
-const LOGO = ['  /\\  ', ' /  \\ ', '/____\\'];
-let W = 0, H = 0, cw = 8, chh = 16, nc = 0, nr = 0, NH = 32, edges, bars, peaks, pvel, fvel, tg, sm, cell, cellG, used, usedN = 0;
-let fft, sens = 1, sensInit = true, cpk, cfl, cpv, cmem, craw, eqw, slow = 0, kick = 0, last = 0, cx = 0, cy = 0, R0 = 100, LM = 100;
-function layout() {
-  const dpr = Math.min(devicePixelRatio || 1, 2); W = VIZ.clientWidth; H = VIZ.clientHeight;
-  if (!W) return; VIZ.width = W * dpr; VIZ.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const fs = Math.max(9, Math.min(16, Math.round(Math.min(W, H) / 52)));
-  g.font = `600 ${fs}px ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`; g.textAlign = 'center'; g.textBaseline = 'middle';
-  cw = g.measureText('M').width || fs * .6; chh = Math.round(fs * 1.25);
-  nc = Math.ceil(W / cw); nr = Math.ceil(H / chh);
-  cell = new Uint8Array(nc * nr); cellG = new Uint8Array(nc * nr); used = new Int32Array(nc * nr);
-  // keep the whole ring in the free area between the header and the control bar (bars at full level must not touch either)
-  const bh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--barh')) || 84, top = 56, avail = Math.max(120, H - top - bh - 34);
-  cx = W / 2; cy = top + avail / 2;
-  const outer = Math.max(60, Math.min(W * .47, avail / 2)); R0 = outer * .42; LM = Math.max(chh, outer - R0 * 1.09 - chh * 1.6);
-  NH = Math.max(14, Math.min(64, Math.floor(Math.PI * R0 / (cw * 1.35)))); // bars per half-ring: as many as the glyph grid can resolve
-  bars = new Float32Array(NH); peaks = new Float32Array(NH); pvel = new Float32Array(NH); fvel = new Float32Array(NH); tg = new Float32Array(NH); sm = new Float32Array(NH);
-  cpk = new Float32Array(NH); cfl = new Float32Array(NH); cpv = new Float32Array(NH); cmem = new Float32Array(NH); craw = new Float32Array(NH); eqw = new Float32Array(NH);
-  sens = 1; sensInit = true;
-  const sr = an ? an.context.sampleRate : 48000, hz = sr / (an ? an.fftSize : 4096), f0 = 50, f1 = Math.min(10000, sr * .45); // cava's default 50 Hz - 10 kHz
-  edges = new Float32Array(NH + 1); for (let i = 0; i <= NH; i++) edges[i] = f0 * Math.pow(f1 / f0, i / NH) / hz; // in FFT bins (fractional)
-  for (let i = 0; i < NH; i++) eqw[i] = 0.7 * Math.pow((edges[i] + edges[i + 1]) / 2 * hz / 150, 0.8); // cava's eq: higher bands get more gain (music falls ~1/f)
+let W = 0, H = 0, DPR = 1, dirty = true, grad, glow, bars = null, peaks = null, vel = null, fft = null, lo = null, hi = null, tilt = null, N = 0, last = 0, binKey = '', bass = 0;
+const resample = (a, n) => { const o = new Float32Array(n); if (a) for (let i = 0; i < n; i++) o[i] = a[Math.min(a.length - 1, Math.floor(i * a.length / n))]; return o; };
+new ResizeObserver(() => { dirty = true; }).observe(VIZ);
+addEventListener('resize', () => { dirty = true; });
+function fit() {
+  if (!dirty && W) return true;
+  const dpr = Math.min(devicePixelRatio || 1, 2), w = VIZ.clientWidth, h = VIZ.clientHeight;
+  if (!w || !h) return false;
+  dirty = false;
+  if (w === W && h === H && dpr === DPR) return true;
+  W = w; H = h; DPR = dpr;
+  VIZ.width = Math.round(w * dpr); VIZ.height = Math.round(h * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  grad = g.createLinearGradient(0, H * .2, 0, H * .62); grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#ff7a1a');
+  glow = g.createRadialGradient(W / 2, H * .62, 0, W / 2, H * .62, Math.max(W, H) * .45); glow.addColorStop(0, 'rgba(255,122,26,.5)'); glow.addColorStop(1, 'rgba(255,122,26,0)');
+  const n = w < 600 ? 28 : 56;
+  if (n !== N) { N = n; bars = resample(bars, n); peaks = resample(peaks, n); vel = resample(vel, n); binKey = ''; }
+  return true;
 }
-new ResizeObserver(layout).observe(VIZ);
-new ResizeObserver(layout).observe($('bar')); // control bar height changes on narrow screens
-const GL = '|-/\\*+#=.:@o';
-const GI = Object.fromEntries([...GL].map((c, i) => [c, i]));
-const glyph = (dx, dy) => { const ax = Math.abs(dx), ay = Math.abs(dy); return ay > 2.2 * ax ? 0 : ax > 2.2 * ay ? 1 : dx * dy < 0 ? 2 : 3; }; // | - / \
-function put(x, y, gl, b) { // keep the brightest glyph per cell
-  const c = Math.floor(x / cw), r = Math.floor(y / chh); if (c < 0 || r < 0 || c >= nc || r >= nr) return;
-  const k = r * nc + c; if (cell[k] === 0) used[usedN++] = k; if (b + 1 > cell[k]) { cell[k] = b + 1; cellG[k] = gl; }
-}
-const NR = 0.77, MONSTER = 1.5, GRAV = 1.54 / NR; // cava defaults: noise_reduction, monstercat, gravity
-function analyse(dt) {
-  const n = an ? an.frequencyBinCount : 2048, k60 = dt * 60; // cava is tuned for 60 fps: scale its per-frame constants by elapsed frames
-  if (!fft || fft.length !== n) { fft = new Float32Array(n); layout(); }
-  if (an) an.getFloatFrequencyData(fft); else fft.fill(-140);
-  // 1) band average of the linear magnitude x eq
-  let rawMax = 0;
-  for (let i = 0; i < NH; i++) {
-    const lo = edges[i], hi = edges[i + 1]; let m;
-    if (hi - lo < 1) { const p = (lo + hi) / 2, i0 = Math.floor(p), f = p - i0, d0 = fft[i0], d1 = fft[Math.min(n - 1, i0 + 1)]; m = Math.pow(10, ((isFinite(d0) ? d0 : -140) * (1 - f) + (isFinite(d1) ? d1 : -140) * f) / 20); } // narrow bass band: interpolate between bins
-    else { let sum = 0, c = 0; for (let j = Math.floor(lo); j <= Math.min(n - 1, Math.ceil(hi)); j++) { const d = fft[j]; sum += isFinite(d) ? Math.pow(10, d / 20) : 0; c++; } m = c ? sum / c : 0; }
-    craw[i] = m * eqw[i]; if (craw[i] > rawMax) rawMax = craw[i];
+// map each bar (per side, 0 = lowest = centre) to a log-spaced FFT bin range
+function prep() {
+  const nb = an.frequencyBinCount, sr = an.context.sampleRate, key = N + ':' + nb + ':' + sr;
+  if (key !== binKey) {
+    binKey = key; fft = new Uint8Array(nb); lo = new Uint16Array(N); hi = new Uint16Array(N); tilt = new Float32Array(N);
+    const nyq = sr / 2, f0 = 35, f1 = Math.min(16000, nyq * .95), at = i => Math.min(nb, f0 * Math.pow(f1 / f0, i / N) / nyq * nb);
+    for (let i = 0; i < N; i++) { lo[i] = Math.min(nb - 1, Math.floor(at(i))); hi[i] = Math.max(lo[i] + 1, Math.floor(at(i + 1))); tilt[i] = .9 + .9 * (i / N); }
   }
-  // 2) gravity falloff + integral (noise reduction), per band
-  const keep = Math.pow(NR, k60), gain = (1 - keep) / (1 - NR);
-  let over = false;
-  for (let i = 0; i < NH; i++) {
-    let v = craw[i] * sens;
-    if (v < cpv[i]) { v = Math.max(0, cpk[i] * (1 - cfl[i] * cfl[i] * GRAV)); cfl[i] += 0.028 * k60; } else { cpk[i] = v; cfl[i] = 0; }
-    cpv[i] = v;
-    cmem[i] = cmem[i] * keep + v * gain; // integral
-    if (cmem[i] > 1) over = true;
-  }
-  // 3) auto-sensitivity: back off on overshoot, creep up otherwise (fast ramp-up until the first overshoot); frozen in silence
-  if (over) { sens *= Math.pow(.98, k60); sensInit = false; }
-  else if (rawMax > 2e-4) { sens *= Math.pow(1.001, k60); if (sensInit) sens *= Math.pow(1.1, k60); }
-  sens = Math.max(.02, Math.min(sens, 5e4));
-  // 4) monstercat: every band pulls its neighbours up, falling off by 1/1.5 per step
-  for (let i = 0; i < NH; i++) sm[i] = Math.min(1, cmem[i]);
-  for (let z = 0; z < NH; z++) { const v = Math.min(1, cmem[z]); for (let y = z - 1; y >= 0; y--) { const m = v / Math.pow(MONSTER, z - y); if (m > sm[y]) sm[y] = m; else if (m < 1e-3) break; } for (let y = z + 1; y < NH; y++) { const m = v / Math.pow(MONSTER, y - z); if (m > sm[y]) sm[y] = m; else if (m < 1e-3) break; } }
-  // bars follow instantly (cava already did the smoothing); peak caps keep their own gravity
-  for (let i = 0; i < NH; i++) {
-    bars[i] = sm[i];
-    if (bars[i] >= peaks[i]) { peaks[i] = bars[i]; pvel[i] = 0; } else { pvel[i] += dt * 1.8; peaks[i] = Math.max(0, peaks[i] - pvel[i] * dt); }
-  }
-  let bass = 0; for (let i = 0; i < Math.min(4, NH); i++) bass = Math.max(bass, bars[i]);
-  slow += (bass - slow) * (1 - Math.exp(-dt * 1.2));
-  const kt = Math.min(1, bass * .45 + Math.max(0, bass - slow) * 2.2); // level + beat transient
-  kick += (kt - kick) * (1 - Math.exp(-dt * (kt > kick ? 55 : 7)));
+  an.getByteFrequencyData(fft);
 }
 function frame(t) {
   raf = requestAnimationFrame(frame);
   const dt = Math.min(.05, (t - last) / 1000 || .016); last = t;
-  if (!nc) { layout(); if (!nc) return; }
-  analyse(dt);
-  cell.fill(0); usedN = 0;
-  const R = R0 * (1 + .09 * kick), gap = chh * .6;
-  // bars: one ray of glyphs per bar, both halves (bass bottom -> treble top)
-  for (let i = 0; i < NH; i++) {
-    const phi = (i + .5) / NH * Math.PI, sx = Math.sin(phi), sy = Math.cos(phi), lvl = bars[i];
-    const len = Math.max(chh * .5, lvl * LM), pk = peaks[i] * LM;
-    for (const sgn of [1, -1]) {
-      const dx = sgn * sx, dy = sy, gl = glyph(dx, dy), step = Math.min(cw, chh) * .45;
-      let lastk = -1;
-      for (let d = 0; d <= len; d += step) {
-        const u = len ? d / len : 0, b = Math.min(5, Math.floor((.18 + .42 * lvl + .4 * u) * 6));
-        const x = cx + dx * (R + gap + d), y = cy + dy * (R + gap + d), k = Math.floor(y / chh) * nc + Math.floor(x / cw);
-        if (k === lastk) continue; lastk = k;
-        put(x, y, d + step > len ? (lvl > .55 ? GI['#'] : GI['+']) : gl, b);
-      }
-      if (pk > len + chh * .8) put(cx + dx * (R + gap + pk), cy + dy * (R + gap + pk), GI['*'], 5); // peak-hold cap
-    }
-  }
-  // ring: glyph follows the tangent, so it reads as a circle
-  const rs = Math.max(48, Math.ceil(2 * Math.PI * R / (Math.min(cw, chh) * .55)));
-  for (let i = 0; i < rs; i++) { const a = i / rs * 2 * Math.PI, ux = Math.sin(a), uy = Math.cos(a); put(cx + ux * R, cy + uy * R, glyph(-uy, ux), Math.min(5, 2 + Math.round(kick * 3))); }
-  // core: glow that swells with the kick, then the cone logo
-  const ramp = [GI['.'], GI['.'], GI[':'], GI['+'], GI['*']];
-  const c0 = Math.max(0, Math.floor((cx - R) / cw)), c1 = Math.min(nc - 1, Math.ceil((cx + R) / cw)), r0 = Math.max(0, Math.floor((cy - R) / chh)), r1 = Math.min(nr - 1, Math.ceil((cy + R) / chh));
-  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-    const d = Math.hypot((c + .5) * cw - cx, (r + .5) * chh - cy) / R; if (d > .9) continue;
-    const v = (1 - d) * kick * 4.2 - .35; if (v <= 0) continue;
-    put((c + .5) * cw, (r + .5) * chh, ramp[Math.min(4, Math.floor(v * 2))], Math.min(4, Math.floor(v * 2.4)));
-  }
+  if (!fit()) return;
+  const have = !!an; if (have) prep();
+  const up = 1 - Math.exp(-dt * 42), down = 1 - Math.exp(-dt * 8);
   g.clearRect(0, 0, W, H);
-  for (let b = 0; b < 6; b++) {
-    g.fillStyle = COLS[b];
-    for (let u = 0; u < usedN; u++) { const k = used[u]; if (cell[k] - 1 !== b) continue; g.fillText(GL[cellG[k]], (k % nc + .5) * cw, (Math.floor(k / nc) + .5) * chh); }
+  const uw = Math.min(W * .92, 1200), step = uw / (2 * N), bw = Math.max(2, step * .66), cx = W / 2, base = H * .62, maxH = H * .5;
+  let bs = 0;
+  for (let i = 0; i < N; i++) {
+    let m = 0; if (have) for (let k = lo[i]; k < hi[i]; k++) if (fft[k] > m) m = fft[k];
+    const tg = Math.min(1, Math.pow(m / 255 * tilt[i], 1.6));
+    bars[i] += (tg - bars[i]) * (tg > bars[i] ? up : down);
+    if (bars[i] >= peaks[i]) { peaks[i] = bars[i]; vel[i] = 0; } else { vel[i] += dt * 1.8; peaks[i] = Math.max(0, peaks[i] - vel[i] * dt); }
+    if (i < 5) bs += bars[i];
   }
-  g.fillStyle = kick > .55 ? '#fff' : '#ff9d4d';
-  for (let r = 0; r < LOGO.length; r++) { const s = LOGO[r]; for (let c = 0; c < s.length; c++) if (s[c] !== ' ') g.fillText(s[c], cx + (c - s.length / 2 + .5) * cw, cy + (r - 1) * chh); }
+  bass += (bs / 5 - bass) * (bs / 5 > bass ? up : 1 - Math.exp(-dt * 5));
+  g.globalAlpha = Math.min(1, bass * 1.1); g.fillStyle = glow; g.fillRect(0, 0, W, H);
+  g.globalAlpha = 1; g.fillStyle = grad; g.beginPath();
+  const xs = (i, s) => s ? cx + i * step + (step - bw) / 2 : cx - (i + 1) * step + (step - bw) / 2;
+  for (let s = 0; s < 2; s++) for (let i = 0; i < N; i++) {
+    const h = Math.max(3, bars[i] * maxH), x = xs(i, s);
+    g.roundRect ? g.roundRect(x, base - h, bw, h, Math.min(bw / 2, 4)) : g.rect(x, base - h, bw, h);
+  }
+  g.fill();
+  g.globalAlpha = .12; g.beginPath();
+  for (let s = 0; s < 2; s++) for (let i = 0; i < N; i++) g.rect(xs(i, s), base + 6, bw, Math.max(3, bars[i] * maxH) * .45);
+  g.fill(); g.globalAlpha = .9; g.fillStyle = '#fff'; g.beginPath();
+  for (let s = 0; s < 2; s++) for (let i = 0; i < N; i++) g.rect(xs(i, s), base - Math.max(3, peaks[i] * maxH) - 5, bw, 2);
+  g.fill(); g.globalAlpha = 1;
 }
-function startViz() { VIZ.style.display = 'block'; cancelAnimationFrame(raf); last = performance.now(); layout(); raf = requestAnimationFrame(frame); }
+function startViz() { VIZ.style.display = 'block'; cancelAnimationFrame(raf); dirty = true; last = performance.now(); raf = requestAnimationFrame(frame); }
 function stopViz() { cancelAnimationFrame(raf); VIZ.style.display = 'none'; }
-document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAnimationFrame(raf); else if (VIZ.style.display === 'block') { last = performance.now(); raf = requestAnimationFrame(frame); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAnimationFrame(raf); else if (VIZ.style.display === 'block') { cancelAnimationFrame(raf); dirty = true; last = performance.now(); raf = requestAnimationFrame(frame); } });
 
 // ---------- seek + A-B loop ----------
 function clearLoop() { A = B = null; drawLoop(); }
