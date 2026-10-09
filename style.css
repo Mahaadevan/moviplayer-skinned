@@ -80,9 +80,22 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 #list{position:absolute;top:0;right:0;bottom:0;width:min(320px,86vw);background:var(--panel);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-left:1px solid var(--line);overflow:auto;padding-top:env(safe-area-inset-top)}
 #list header{display:flex;align-items:center;justify-content:space-between;padding:14px 12px 8px 18px;font-weight:600}
 #items{margin:0;padding:0 8px 24px;list-style:none;counter-reset:q}
-#items li{counter-increment:q;display:flex;gap:12px;padding:10px;border-radius:10px;color:var(--dim);cursor:pointer;transition:background .15s,color .15s}
-#items li::before{content:counter(q);width:18px;text-align:right;font-variant-numeric:tabular-nums;opacity:.6}
-#items li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#items li{counter-increment:q;display:flex;align-items:center;gap:8px;padding:10px 6px 10px 10px;border-radius:10px;color:var(--dim);cursor:pointer;transition:background .15s,color .15s}
+#items li::before{order:1;content:counter(q);width:18px;text-align:right;font-variant-numeric:tabular-nums;opacity:.6}
+#items li .lab{order:2;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grip{order:0;flex:none;width:18px;height:28px;display:grid;place-items:center;opacity:.4;cursor:grab;touch-action:none;border-radius:6px}
+.grip svg{width:16px;height:16px}
+#items li:hover .grip,.grip:active{opacity:.9}
+.rm{order:3;flex:none;width:28px;height:28px;display:grid;place-items:center;border-radius:50%;color:var(--dim);transition:background .15s,color .15s}
+.rm svg{width:16px;height:16px}
+.rm:hover{background:rgba(255,90,90,.18);color:#ff7b7b}
+.cf{order:4;display:none;flex:none;gap:6px}
+#items li.ask .rm{display:none}#items li.ask .cf{display:flex}
+.cf button{height:26px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line);color:var(--ink)}
+.cf .yes{background:#e5484d;border-color:#e5484d;color:#fff}
+.cf .no:hover{background:rgba(255,255,255,.1)}
+#items li.dragging{position:relative;z-index:3;background:rgba(60,60,66,.95);color:var(--ink);box-shadow:0 10px 28px #000a;cursor:grabbing;transition:none}
+body.reordering{cursor:grabbing}body.reordering #items{user-select:none}
 #items li:hover{background:rgba(255,255,255,.06);color:var(--ink)}#items li.cur{color:var(--acc)}
 
 /* toasts */
