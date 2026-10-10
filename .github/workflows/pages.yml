@@ -19,8 +19,7 @@ jobs:
         with: { node-version: 20 }
       - name: Syntax check
         run: |
-          node --check js/app.js
-          node --check js/convert.js
+          node --check app.js
   deploy:
     needs: check
     runs-on: ubuntu-latest
