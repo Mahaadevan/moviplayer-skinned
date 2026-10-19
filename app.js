@@ -1,202 +1,523 @@
-const {FFmpeg}=FFmpegWASM,{fetchFile,toBlobURL}=FFmpegUtil,{animate,stagger}=Motion;
-const $=s=>document.querySelector(s),CDN='https://cdn.jsdelivr.net/npm/';
-const html=document.documentElement,lite=()=>html.hasAttribute('data-lite'),A=(t,k,o)=>lite()?null:animate(t,k,o);
-const prof=(p,px)=>['-c:v','prores_ks','-profile:v',p,'-pix_fmt',px];
-const dnx=(p,px)=>['-c:v','dnxhd','-profile:v',p,'-pix_fmt',px];
-const VC={dnx_lb:['DNxHR LB (proxy)',dnx('dnxhr_lb','yuv422p')],dnx_sq:['DNxHR SQ',dnx('dnxhr_sq','yuv422p')],dnx_hq:['DNxHR HQ (8-bit)',dnx('dnxhr_hq','yuv422p')],dnx_hqx:['DNxHR HQX (10-bit)',dnx('dnxhr_hqx','yuv422p10le')],dnx_444:['DNxHR 444 (10-bit)',dnx('dnxhr_444','yuv444p10le')],
-pr_proxy:['ProRes Proxy',prof('0','yuv422p10le')],pr_lt:['ProRes LT',prof('1','yuv422p10le')],pr_422:['ProRes 422',prof('2','yuv422p10le')],pr_hq:['ProRes 422 HQ',prof('3','yuv422p10le')],pr_4444:['ProRes 4444 (alpha)',prof('4','yuva444p10le')],mjpeg:['MJPEG (high quality)',['-c:v','mjpeg','-q:v','2','-pix_fmt','yuvj422p']],none:['No video (audio only)',[]]};
-const AC={pcm16:['PCM 16-bit',['-c:a','pcm_s16le']],pcm24:['PCM 24-bit',['-c:a','pcm_s24le']],none:['No audio',['-an']]};
-const CT={mov:'MOV',mkv:'MKV',mxf:'MXF'},RES={'':'Source','3840:2160':'4K UHD 16:9','2560:1440':'1440p 16:9','1920:1080':'1080p 16:9','1280:720':'720p 16:9','1080:1920':'1080×1920 9:16','1080:1350':'1080×1350 4:5','1080:1080':'1080×1080 1:1','720:1280':'720×1280 9:16'},CTA={wav:'WAV',aiff:'AIFF',flac:'FLAC'},FIT={pad:'Fit (letterbox)',crop:'Fill (crop)'},SR={'':'Source','44100':'44.1 kHz','48000':'48 kHz','96000':'96 kHz'},FPS={'':'Source','24':'24','25':'25','30':'30','50':'50','60':'60'};
-const ROT={'':'None','transpose=1':'90° CW','transpose=2':'90° CCW','transpose=1,transpose=1':'180°'};
-const P=(n,d,o)=>({n,d,v:'dnx_hq',a:'pcm16',c:'mov',r:'',f:'',fit:'pad',sr:'',...o});
-const PRESETS={edit:P('Edit · DNxHR HQ','Intra-frame, fast scrubbing. Best general codec for Resolve Free on Linux.',{}),
-color:P('Color · ProRes 422 HQ','10-bit 4:2:2 for grading. Larger files.',{v:'pr_hq',a:'pcm24'}),
-proxy:P('Proxy · 720p','Tiny, light files for weak PCs.',{v:'dnx_lb',r:'1280:720'}),
-alpha:P('Alpha · ProRes 4444','Keeps transparency.',{v:'pr_4444',a:'pcm24'}),
-yt:P('YouTube 1080p','Platform size 16:9 1920×1080, source fps (YouTube accepts 24–60). Resolve-safe DNxHR HQ + PCM.',{r:'1920:1080'}),
-yt4k:P('YouTube 4K','16:9 3840×2160, source fps. Heavy files.',{r:'3840:2160'}),
-shorts:P('YT Shorts','9:16 1080×1920, 30 fps, cropped to fill.',{r:'1080:1920',f:'30',fit:'crop'}),
-reels:P('Reels / TikTok','9:16 1080×1920, 30 fps, cropped to fill.',{r:'1080:1920',f:'30',fit:'crop'}),
-igfeed:P('Instagram 4:5','Portrait feed 1080×1350, 30 fps.',{r:'1080:1350',f:'30',fit:'crop'}),
-square:P('Square 1:1','1080×1080, 30 fps (Instagram / Facebook).',{r:'1080:1080',f:'30',fit:'crop'}),
-x:P('X / Twitter','16:9 1280×720, 30 fps.',{r:'1280:720',f:'30'}),
-fb:P('Facebook','16:9 1920×1080, 30 fps.',{r:'1920:1080',f:'30'}),
-wav:P('Audio · WAV 24-bit','48 kHz PCM — safest audio for Resolve Free on Linux.',{v:'none',a:'pcm24',c:'wav',sr:'48000'}),
-aiff:P('Audio · AIFF','48 kHz PCM, big-endian.',{v:'none',a:'pcm24',c:'aiff',sr:'48000'}),
-flac:P('Audio · FLAC','Lossless, smaller than WAV.',{v:'none',a:'pcm24',c:'flac',sr:'48000'})};
-const FEATS=['Any input format|Everything ffmpeg can read','Platform presets|YouTube, Reels, TikTok, X, Facebook…','Private|Files never leave your browser','Format menus|Codec, audio, container, size, fps','Dev menu|Command, logs, stats, file analysis','Audio spectrum|Simple bar visualizer in the accent colours','Lite mode|One switch turns off blur, glow and animations','Glass UI|Dark / light, Resolve gradient'];
-const fill=(id,o)=>$(id).innerHTML=Object.entries(o).map(([k,v])=>`<option value="${k}">${Array.isArray(v)?v[0]:v}</option>`).join('');
-fill('#vc',VC);fill('#ac',AC);fill('#ct',CT);fill('#res',RES);fill('#fps',FPS);fill('#fit',FIT);fill('#sr',SR);
-$('#featList').innerHTML=FEATS.map(f=>{const[a,b]=f.split('|');return`<div class="glass"><b>${a}</b><br><span class="muted">${b}</span></div>`}).join('');
-let hz=0,items=[],sel=-1,ff,file,loaded=false,busy=false,url,lines=[],t0=0,inSize=0,outSize=0,elapsed=0,cap=null;const plyr=new Plyr('#player');
-const errMsg=e=>e instanceof Error?e.message:typeof e==='string'?e:(e&&e.message)||(()=>{try{return JSON.stringify(e)}catch{return''}})()||'Unknown error';
-function toast(m,e){const t=document.createElement('div');t.className='toast'+(e?' err':'');t.textContent=m;$('#toasts').append(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),lite()?0:420)},4500)}
-function log(s,c){const d=document.createElement('div');c=c||(/error|invalid|fail|no such|unknown/i.test(s)?'err':/warn/i.test(s)?'warn':'');d.className=c;const l=`[${new Date().toLocaleTimeString()}] ${s}`;d.textContent=l;lines.push(l);const L=$('#log');L.append(d);while(L.childElementCount>2000)L.firstChild.remove();L.scrollTop=L.scrollHeight}
-function stats(){const mb=n=>n?(n/1048576).toFixed(2)+' MB':'–';$('#stats').innerHTML=[['Engine',loaded?'ready':'not loaded'],['Isolated',self.crossOriginIsolated?'yes':'no (single thread)'],['Input',mb(inSize)],['Output',mb(outSize)],['Ratio',inSize&&outSize?(outSize/inSize).toFixed(2)+'×':'–'],['Elapsed',elapsed?(elapsed/1000).toFixed(1)+' s':'–'],['Display refresh',hz?hz+' Hz (animations run at this rate)':'measuring…']].map(([a,b])=>`<div>${a}<b>${b}</b></div>`).join('')}
-function mk(){ff=new FFmpeg();ff.on('log',({message})=>{log(message);if(cap)cap.push(message)});ff.on('progress',({progress})=>{const p=Math.min(100,Math.max(0,Math.round((progress||0)*100)));$('#pb').style.width=p+'%';$('#pt').textContent=p+'%'})}mk();
-async function reset(){try{ff.terminate()}catch{}loaded=false;mk();stats()}
-async function load(){if(loaded)return;toast('Loading engine (~30 MB, cached after)…');log('Loading ffmpeg core 0.12.6','ok');const b=CDN+'@ffmpeg/core@0.12.6/dist/umd/';
-await ff.load({coreURL:await toBlobURL(b+'ffmpeg-core.js','text/javascript'),wasmURL:await toBlobURL(b+'ffmpeg-core.wasm','application/wasm'),classWorkerURL:await toBlobURL(CDN+'@ffmpeg/ffmpeg@0.12.10/dist/umd/814.ffmpeg.js','text/javascript')});loaded=true;log('Engine ready','ok');stats()}
-const IN=()=>{const x=(file.name.split('.').pop()||'').toLowerCase();return'in.'+(/^[a-z0-9]{1,5}$/.test(x)?x:'bin')};
-const AUD={wav:{pcm16:'pcm_s16le',pcm24:'pcm_s24le'},aiff:{pcm16:'pcm_s16be',pcm24:'pcm_s24be'}};
-function setCT(noV){const s=$('#ct'),k=noV?'a':'v';if(s.dataset.k===k)return;const cur=s.value;fill('#ct',noV?CTA:CT);s.dataset.k=k;if([...s.options].some(o=>o.value===cur))s.value=cur}
-function build(cli){const v=$('#vc').value,a=$('#ac').value,r=$('#res').value,f=$('#fps').value,rot=rotv(),fit=$('#fit').value,sr=$('#sr').value,noV=v==='none',ct=$('#ct').value;
-const ext=noV?(CTA[ct]?ct:'wav'):ct,ex=$('#extra').value.trim().split(/\s+/).filter(Boolean);
-let sc='';if(r){const[w,h]=r.split(':');sc=fit==='crop'?`scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},setsar=1`:`scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1`}
-const vf=[rot,sc,f&&`fps=${f}`].filter(Boolean).join(','),bd=a==='pcm24'?'pcm24':'pcm16';
-const aud=noV?(ext==='flac'?['-c:a','flac',...(bd==='pcm24'?['-sample_fmt','s32']:[])]:['-c:a',AUD[ext][bd]]):AC[a][1];
-const inp=cli&&file?`"${file.name}"`:file?IN():'input',out=cli&&file?`"${file.name.replace(/\.[^.]+$/,'')}_resolve.${ext}"`:'out.'+ext;
-return{ext,out:'out.'+ext,args:['-hide_banner','-loglevel',$('#ll').value,'-i',inp,...(noV?['-vn']:[...(vf?['-vf',cli?`"${vf}"`:vf]:[]),...VC[v][1]]),...aud,...(sr?['-ar',sr]:[]),...ex,...(cli?[out]:['out.'+ext])]}}
-function refresh(){setCT($('#vc').value==='none');$('#cmd').textContent='ffmpeg '+build(true).args.join(' ');$('#go').textContent='Convert → '+build(false).ext.toUpperCase()}
-$('#presets').innerHTML=Object.entries(PRESETS).map(([k,p])=>`<button data-k="${k}">${p.n}</button>`).join('');
-$('#presets').onclick=e=>{const k=e.target.dataset.k;if(!k)return;const p=PRESETS[k];document.querySelectorAll('#presets button').forEach(b=>b.classList.toggle('on',b===e.target));$('#pdesc').textContent=p.d;$('#vc').value=p.v;setCT(p.v==='none');$('#ac').value=p.a;$('#ct').value=p.c;$('#res').value=p.r;$('#fps').value=p.f;$('#fit').value=p.fit;$('#sr').value=p.sr;refresh()};
-$('#presets button').click();['vc','ac','ct','res','fps','fit','sr','extra','ll'].forEach(i=>$('#'+i).addEventListener('input',()=>{if(['vc','ac','ct','res','fps','fit','sr'].includes(i))document.querySelectorAll('#presets button').forEach(b=>b.classList.remove('on'));refresh()}));
-const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const OKX=/\.(mkv|mts|m2ts|flv|wmv|avi|ts|mxf|3gp|mov|mp4|webm|m4a|mp3|wav|flac|ogg|aac|aif|aiff|opus)$/i,isAud=f=>/^audio\//.test(f.type)||/\.(m4a|mp3|wav|flac|ogg|aac|aif|aiff|opus)$/i.test(f.name);
-function rotv(){return items[sel]?items[sel].rot:''}
-const STL={'':'Pending',run:'Converting…',done:'Done',err:'Failed'};
-const upd=()=>{['#go','#frame','#analyze'].forEach(s=>$(s).disabled=busy||!file);$('#all').disabled=busy||!items.length};
-function render(){$('#queue').innerHTML=items.length?items.map((it,i)=>`<div class="q${i===sel?' on':''}" data-i="${i}"><span class="qn">${esc(it.f.name)}</span><small>${(it.f.size/1048576).toFixed(1)} MB</small><select data-r="${i}" title="Rotate this file">${Object.entries(ROT).map(([k,v])=>`<option value="${k}"${k===it.rot?' selected':''}>${v==='None'?'↻ No rotation':'↻ '+v}</option>`).join('')}</select><em class="st ${it.st}">${STL[it.st]}</em><b data-x="${i}" title="Remove">×</b></div>`).join(''):'<p class="muted">No media yet — add files or drop them above.</p>'}
-function choose(i){sel=i;file=items[i]&&items[i].f;render();if(!file){$('#fname').textContent='No file selected';$('#info').textContent='File info appears after loading a file.';try{plyr.stop()}catch{}spec.mode(false);upd();refresh();return}
-inSize=file.size;outSize=0;elapsed=0;$('#fname').textContent=items.length>1?`${items.length} files queued`:file.name;if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(file);
-spec.mode(isAud(file));plyr.source={type:'video',sources:[{src:url,type:file.type||'video/mp4'}]};$('#info').textContent=`${file.name}\n${(file.size/1048576).toFixed(1)} MB · ${file.type||'unknown type'}`;log(`Selected ${file.name} (${file.size} bytes, ${file.type||'?'})`,'ok');
-if(isAud(file)&&$('#vc').value!=='none')$('#presets [data-k=wav]').click();upd();refresh();stats()}
-function addFiles(l){let n=0;for(const f of l){if(!/^(video|audio)\//.test(f.type)&&!OKX.test(f.name)){toast('Skipped '+f.name,1);continue}items.push({f,rot:'',st:''});n++}if(!n)return;toast(n+' file'+(n>1?'s':'')+' added');sel<0?choose(items.length-n):(render(),upd())}
-$('#queue').onclick=e=>{if(busy||e.target.closest('select'))return;const x=e.target.dataset.x;if(x!==undefined){items.splice(+x,1);choose(items.length?Math.min(sel>+x?sel-1:sel,items.length-1):-1)}else{const q=e.target.closest('[data-i]');q&&choose(+q.dataset.i)}};
-$('#queue').onchange=e=>{const r=e.target.dataset.r;if(r===undefined)return;items[+r].rot=e.target.value;if(+r===sel)refresh();toast('Rotation set: '+items[+r].f.name)};
-$('#add').onclick=()=>$('#file').click();$('#clr').onclick=()=>{if(!busy){items=[];choose(-1)}};
-$('#all').onclick=async()=>{if(busy)return;for(let i=0;i<items.length;i++){choose(i);await $('#go').onclick()}};
-const d=$('#drop');d.onclick=()=>$('#file').click();d.onkeydown=e=>{if(e.key==='Enter')$('#file').click()};$('#file').onchange=e=>{addFiles(e.target.files);e.target.value=''};
-['dragover','dragenter'].forEach(v=>d.addEventListener(v,e=>{e.preventDefault();d.classList.add('on')}));
-['dragleave','drop'].forEach(v=>d.addEventListener(v,e=>{e.preventDefault();d.classList.remove('on')}));d.ondrop=e=>addFiles(e.dataTransfer.files);
-['loadedmetadata','play','pause','seeked','ended'].forEach(ev=>plyr.on(ev,()=>log(`player:${ev} t=${plyr.currentTime.toFixed(2)} dur=${(plyr.duration||0).toFixed(2)}`,'pl')));
-plyr.on('error',()=>{log('player: browser cannot decode this source (conversion still works)','warn');toast('Browser can’t preview this codec — conversion still works',1)});
-const btns=['#go','#frame','#analyze','#all'];const setBusy=b=>{busy=b;btns.forEach(s=>$(s).disabled=b||!file)};
-async function run(args,out,mime,name,after){if(!file)return toast('Choose a file first',1);if(busy)return;setBusy(true);$('.bar').hidden=false;$('#pb').style.width='0';$('#pt').textContent='0%';t0=performance.now();
-log('ffmpeg '+args.join(' '),'ok');
-try{await load();await ff.writeFile(IN(),await fetchFile(file));const code=await ff.exec(args);if(code!==0)throw new Error(`ffmpeg exited with code ${code} — see Dev ▸ log`);
-let data;try{data=await ff.readFile(out)}catch{throw new Error('No output file was produced — see Dev ▸ log')}if(!data||!data.length)throw new Error('Output is empty — encoder may be missing in this wasm build');
-const l=document.createElement('a');l.href=URL.createObjectURL(new Blob([data],{type:mime}));l.download=name;l.className='btn';l.textContent='Download '+name;$('#out').append(l);A(l,{opacity:[0,1],transform:['translateY(12px)','translateY(0px)']});
-outSize=data.length;elapsed=performance.now()-t0;$('#pb').style.width='100%';$('#pt').textContent='100%';log(`Done in ${(elapsed/1000).toFixed(1)} s → ${name} (${outSize} bytes)`,'ok');toast('Done ✔');return true}
-catch(e){const m=errMsg(e);log('ERROR: '+m,'err');toast('Failed: '+m+(/memory|abort|out of bounds/i.test(m)?' (file may be too large for wasm)':''),1);await reset();return false}
-finally{try{await ff.deleteFile(IN())}catch{}try{await ff.deleteFile(out)}catch{}setBusy(false);stats()}}
-$('#go').onclick=async()=>{if(!file)return;const it=items[sel],b=build(false),base=file.name.replace(/\.[^.]+$/,'');if($('#vc').value==='none'&&$('#ac').value==='none')return toast('Audio-only needs an audio codec',1);
-it.st='run';render();const ok=await run(b.args,b.out,({wav:'audio/wav',aiff:'audio/aiff',flac:'audio/flac'})[b.ext]||'video/quicktime',`${base}_resolve.${b.ext}`);it.st=ok?'done':'err';render()};
-const RTX={'transpose=1':90,'transpose=2':-90,'transpose=1,transpose=1':180};
-async function grab(t,img,rot){const v=plyr.media;if(!v||!v.videoWidth)throw new Error('browser cannot decode this video');
-if(Math.abs(v.currentTime-t)>.01)await new Promise(ok=>{const s=()=>{v.removeEventListener('seeked',s);ok()};v.addEventListener('seeked',s);v.currentTime=Math.min(t,v.duration||t);setTimeout(ok,4000)});
-const a=RTX[rot]||0,w=v.videoWidth,h=v.videoHeight,c=document.createElement('canvas'),sw=Math.abs(a)===90;c.width=sw?h:w;c.height=sw?w:h;const x=c.getContext('2d');x.translate(c.width/2,c.height/2);x.rotate(a*Math.PI/180);x.drawImage(v,-w/2,-h/2);
-return new Promise((ok,no)=>c.toBlob(b=>b?ok(b):no(new Error('Canvas export failed')),img==='png'?'image/png':'image/jpeg',.95))}
-$('#frame').onclick=async()=>{if(!file||busy)return;const img=$('#fimg').value,raw=$('#ft').value,rot=rotv(),t=raw===''?(plyr.currentTime||0):parseFloat(raw);if(!isFinite(t)||t<0)return toast('Invalid time',1);
-const name=`${file.name.replace(/\.[^.]+$/,'')}_${t.toFixed(2)}s.${img}`;
-try{const blob=await grab(t,img,rot),l=document.createElement('a');l.href=URL.createObjectURL(blob);l.download=name;l.className='btn';l.textContent='Download '+name;$('#out').append(l);A(l,{opacity:[0,1],transform:['translateY(12px)','translateY(0px)']});toast('Frame extracted ✔');log(`Frame saved ${name} (${blob.size} bytes)`,'ok');return}
-catch(e){log('Canvas capture unavailable ('+errMsg(e)+') — using ffmpeg','warn')}
-const out='frame.'+img;run(['-hide_banner','-loglevel',$('#ll').value,'-i',IN(),'-ss',t.toFixed(3),...(rot?['-vf',rot]:[]),'-frames:v','1','-update','1',...(img==='jpg'?['-pix_fmt','yuvj420p','-q:v','2']:['-pix_fmt','rgb24']),out],out,img==='png'?'image/png':'image/jpeg',name)};
-$('#analyze').onclick=async()=>{if(busy||!file)return;setBusy(true);cap=[];try{await load();await ff.writeFile(IN(),await fetchFile(file));await ff.exec(['-hide_banner','-i',IN()]);
-const s=cap.filter(m=>/Duration|Stream #|Input #|major_brand|encoder/i.test(m)).map(m=>m.trim());$('#info').textContent=file.name+'\n'+(s.join('\n')||'No stream info found');toast('Analysis complete')}
-catch(e){const m=errMsg(e);log('ERROR: '+m,'err');toast('Analyze failed: '+m,1);await reset()}finally{cap=null;try{await ff.deleteFile(IN())}catch{}setBusy(false)}};
-$('#devT').onchange=e=>{$('#dev').hidden=!e.target.checked;stats()};
-const flash=async(t)=>{try{await navigator.clipboard.writeText(t);toast('Copied')}catch{toast('Copy blocked by browser',1)}};
-$('#copyCmd').onclick=()=>flash('ffmpeg '+build(true).args.join(' '));$('#copyLog').onclick=()=>flash(lines.join('\n'));$('#clrLog').onclick=()=>{lines=[];$('#log').replaceChildren()};
-$('#dlLog').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/plain'}));a.download='media-resolve.log';a.click()};
-const tt=document.createElement('div');tt.id='tt';document.body.append(tt);
-function tip(el){tt.textContent=el.dataset.tip;tt.style.opacity=1;const r=el.getBoundingClientRect(),w=tt.offsetWidth,h=tt.offsetHeight;const x=Math.max(8,Math.min(innerWidth-w-8,r.left+r.width/2-w/2));let y=r.bottom+8;if(y+h>innerHeight-8)y=Math.max(8,r.top-h-8);tt.style.transform=`translate(${x}px,${y}px)`}
-document.addEventListener('mouseover',e=>{const el=e.target.closest('[data-tip]');el?tip(el):tt.style.opacity=0});document.addEventListener('focusin',e=>{const el=e.target.closest('[data-tip]');el&&tip(el)});document.addEventListener('focusout',()=>tt.style.opacity=0);document.addEventListener('scroll',()=>tt.style.opacity=0,true);
-$('#themeT').onclick=()=>{const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark';try{localStorage.theme=h.dataset.theme}catch{}};
-try{document.documentElement.dataset.theme=localStorage.theme||'dark'}catch{}
-try{if(localStorage.lite==='1')html.setAttribute('data-lite','')}catch{}
-A('.drop, .card',{opacity:[0,1],transform:['translateY(24px)','translateY(0px)']},{delay:stagger(.08),duration:.6});stats();
-document.addEventListener('pointerdown',e=>{const b=e.target.closest('.btn,.presets button,.ico');if(!b||b.disabled||lite())return;const r=b.getBoundingClientRect(),s=Math.max(r.width,r.height)*2,p=document.createElement('span');p.className='rip';p.style.cssText=`width:${s}px;height:${s}px;left:${e.clientX-r.left-s/2}px;top:${e.clientY-r.top-s/2}px`;b.append(p);setTimeout(()=>p.remove(),700)});
+// Cone — custom GUI skin over movi-player (https://github.com/MrUjjwalG/movi-player), loaded from CDN.
+const CDN = 'https://cdn.jsdelivr.net/npm/';
+const MOVI = CDN + 'movi-player@0.4.1/dist/element.js';
+const MOTION = CDN + 'motion@14.0.0/+esm';
+const $ = id => document.getElementById(id);
+const V = $('video'), VIZ = $('viz');
+const MEDIA = 'mp4 m4v mov webm ogv mkv avi ts m2ts mts mpg mpeg flv wmv 3gp mp3 m4a aac flac opus ogg oga wav weba wma ac3'.split(' ');
+const ext = n => n.split('.').pop().toLowerCase();
+const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+let queue = [], idx = -1, A = null, B = null, an = null, raf = 0, aspIdx = 0, rotIdx = 0, rateIdx = 2;
 
-/* ---------- Simple audio spectrum: rounded bars in the site's red-to-gold gradient (Web Audio + canvas) ---------- */
-const spec=(()=>{
-const NB=48;
-const cv=document.createElement('canvas');cv.id='spec';cv.hidden=true;cv.setAttribute('aria-hidden','true');const g=cv.getContext('2d');
-const bars=new Float32Array(NB),edges=new Int32Array(NB+1);
-let ac,an,node,el,bins,W=0,H=0,dpr=1,raf=0,last=0,audio=false,playing=false,busy=0;
-const host=()=>{const c=plyr.elements&&plyr.elements.container;if(c&&cv.parentNode!==c)c.append(cv)};
-function size(){const r=cv.getBoundingClientRect();W=Math.round(r.width);H=Math.round(r.height);if(!W||!H)return;
-dpr=lite()?1:Math.min(devicePixelRatio||1,2);cv.width=W*dpr;cv.height=H*dpr;g.setTransform(dpr,0,0,dpr,0,0)}
-function bandEdges(){const lo=2,hi=Math.min(an.frequencyBinCount-1,700),k=Math.pow(hi/lo,1/NB);edges[0]=lo;for(let i=0;i<NB;i++)edges[i+1]=Math.max(edges[i]+1,Math.round(lo*Math.pow(k,i+1)))}
-async function ensure(){if(!audio||!plyr.media)return false;if(el===plyr.media&&node)return true;if(busy)return false;busy=1;
-try{const AC=window.AudioContext||window.webkitAudioContext;ac=ac||new AC();if(ac.state!=='running')await ac.resume();if(ac.state!=='running')return false;
-if(!an){an=ac.createAnalyser();an.fftSize=2048;an.smoothingTimeConstant=.55;bins=new Uint8Array(an.frequencyBinCount);an.connect(ac.destination);bandEdges()}
-try{node&&node.disconnect()}catch{}const m=plyr.media;node=ac.createMediaElementSource(m);node.connect(an);el=m;log('spectrum: analyser connected','ok');return true}
-catch(e){log('spectrum: '+errMsg(e),'warn');return false}finally{busy=0}}
-function frame(t){raf=0;if(cv.hidden)return;const L=lite();
-if(L&&t-last<33){raf=requestAnimationFrame(frame);return}/* lite mode: 30 fps cap */
-const dt=Math.min(.1,Math.max(.001,(t-last)/1000));last=t;
-const live=playing&&an&&node&&el===plyr.media;if(live)an.getByteFrequencyData(bins);
-const ak=1-Math.exp(-dt*28),rk=1-Math.exp(-dt*7);let mx=0;
-for(let i=0;i<NB;i++){let v=0;if(live){for(let k=edges[i],e=edges[i+1];k<e;k++)if(bins[k]>v)v=bins[k];v=Math.min(1,Math.pow(v/255,1.3)*(.85+.9*i/NB))}
-bars[i]+=(v-bars[i])*(v>bars[i]?ak:rk);if(bars[i]>mx)mx=bars[i]}
-g.clearRect(0,0,W,H);
-const padX=Math.max(14,W*.05),base=H-Math.min(64,H*.2),maxH=Math.max(20,base-H*.14),slot=(W-padX*2)/NB,bw=Math.max(2,slot*.66),rad=bw/2;
-const gr=g.createLinearGradient(0,base,0,base-maxH);gr.addColorStop(0,'#b3202a');gr.addColorStop(.45,'#ef4136');gr.addColorStop(.8,'#ff8a6b');gr.addColorStop(1,'#f7c01d');
-g.fillStyle=gr;if(!L){g.shadowColor='rgba(239,65,54,.55)';g.shadowBlur=12}
-g.beginPath();
-for(let i=0;i<NB;i++){const h=3+bars[i]*maxH,x=padX+i*slot+(slot-bw)/2;g.roundRect?g.roundRect(x,base-h,bw,h,[rad,rad,0,0]):g.rect(x,base-h,bw,h)}
-g.fill();g.shadowBlur=0;
-if(playing||mx>.004)raf=requestAnimationFrame(frame)}
-const kick=()=>{if(!raf&&!cv.hidden){last=performance.now();raf=requestAnimationFrame(frame)}};
-new ResizeObserver(()=>{if(!cv.hidden){size();kick()}}).observe(cv);
-return{cv,
-mode(on){audio=on;host();cv.hidden=!on;if(on){size();kick()}else{if(raf)cancelAnimationFrame(raf);raf=0;bars.fill(0);playing=false}},
-meta(){const m=plyr.media;if(file&&m&&!audio&&m.videoWidth===0&&m.duration>0)this.mode(true)},
-play(p){playing=p;if(!audio)return;if(p){ensure().then(kick);kick()}else kick()},
-refresh(){if(!cv.hidden){size();kick()}}}})();
-plyr.on('loadedmetadata',()=>spec.meta());plyr.on('play',()=>spec.play(true));plyr.on('playing',()=>spec.play(true));plyr.on('pause',()=>spec.play(false));plyr.on('ended',()=>spec.play(false));
+// ---------- drag & drop (registered synchronously, before any library loads) ----------
+let dc = 0;
+const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files');
+const endDrag = () => { dc = 0; document.body.classList.remove('drag'); };
+addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); dc++; document.body.classList.add('drag'); });
+addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+addEventListener('dragleave', e => { if (hasFiles(e) && --dc <= 0) endDrag(); });
+addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); const fs = [...e.dataTransfer.files]; endDrag(); addFiles(fs, {dropped: true}); });
 
-/* ---------- Lite mode (disable UI effects) ---------- */
-function glitch(){if(matchMedia('(prefers-reduced-motion:reduce)').matches)return;html.classList.remove('glitch');void html.offsetWidth;html.classList.add('glitch');setTimeout(()=>html.classList.remove('glitch'),700)}
-function setLite(on,save){on?html.setAttribute('data-lite',''):html.removeAttribute('data-lite');$('#fxT').checked=on;if(save){try{localStorage.lite=on?'1':'0'}catch{}toast(on?'Lite mode on — effects disabled':'Effects enabled')}spec.refresh();if(save)glitch()}
-$('#fxT').onchange=e=>setLite(e.target.checked,true);
-try{if(localStorage.lite==='1')setLite(true)}catch{}
+// ---------- spectrum tap: route every AudioContext destination connection through an analyser ----------
+const rawConnect = AudioNode.prototype.connect;
+AudioNode.prototype.connect = function (t, ...r) {
+  if (typeof AudioDestinationNode !== 'undefined' && t instanceof AudioDestinationNode && this !== t.context.__an) {
+    const c = t.context;
+    if (!c.__an) { an = c.__an = c.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = .35; an.minDecibels = -85; an.maxDecibels = -20; rawConnect.call(an, c.destination); }
+    return rawConnect.call(this, c.__an, ...r);
+  }
+  return rawConnect.call(this, t, ...r);
+};
+let M = null;
+const lib = Promise.all([import(MOVI), customElements.whenDefined('movi-player'), import(MOTION).catch(() => null)]).then(([, , m]) => { M = m; initMotion(); });
+lib.catch(() => toast('Could not load the player library — check your connection'));
+const spring = {type: 'spring', stiffness: 420, damping: 30};
+const anim = (el, kf, o = spring) => M ? M.animate(el, kf, o) : null;
 
-/* ---------- Mouse glow: soft follow, time-based so it feels the same at 60/120/144 Hz ---------- */
-(()=>{const g=$('#glow'),RATE=9;/* higher = snappier. 9/s is about 0.14 per frame at 60 fps */
-let x=innerWidth/2,y=innerHeight/3,tx=x,ty=y,raf=0,last=0;const set=()=>g.style.transform=`translate3d(${x}px,${y}px,0)`;set();
-const f=t=>{const dt=Math.min(.05,Math.max(.001,(t-last)/1000)),k=1-Math.exp(-dt*RATE);last=t;x+=(tx-x)*k;y+=(ty-y)*k;set();raf=Math.abs(tx-x)>.1||Math.abs(ty-y)>.1?requestAnimationFrame(f):0};
-addEventListener('pointermove',e=>{if(lite())return;tx=e.clientX;ty=e.clientY;if(!raf){last=performance.now();raf=requestAnimationFrame(f)}},{passive:true})})();
+// ---------- icons ----------
+const P = {
+  play: '<path class="f" d="M7 4.5v15l13-7.5z"/>', pause: '<rect class="f" x="6" y="4" width="4.5" height="16" rx="1"/><rect class="f" x="13.5" y="4" width="4.5" height="16" rx="1"/>',
+  prev: '<path class="f" d="M19 5v14L8.5 12z"/><path d="M5 5v14"/>', next: '<path class="f" d="M5 5v14l10.5-7z"/><path d="M19 5v14"/>',
+  vol: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>', mute: '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6m0-6 6 6"/>',
+  more: '<circle class="f" cx="5" cy="12" r="1.6"/><circle class="f" cx="12" cy="12" r="1.6"/><circle class="f" cx="19" cy="12" r="1.6"/>', list: '<path d="M9 6h12M9 12h12M9 18h12"/><circle class="f" cx="4.5" cy="6" r="1"/><circle class="f" cx="4.5" cy="12" r="1"/><circle class="f" cx="4.5" cy="18" r="1"/>',
+  full: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  audio: '<path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h1a2 2 0 0 1 2 2zM3 15a2 2 0 0 0 2 2h1v-5H5a2 2 0 0 0-2 2z"/>',
+  subs: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 14h4M15 14h2M7 10h2M13 10h4"/>', aspect: '<rect x="3" y="6" width="18" height="12" rx="2.5"/>', rotate: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>', grip: '<circle class="f" cx="9" cy="6" r="1.4"/><circle class="f" cx="15" cy="6" r="1.4"/><circle class="f" cx="9" cy="12" r="1.4"/><circle class="f" cx="15" cy="12" r="1.4"/><circle class="f" cx="9" cy="18" r="1.4"/><circle class="f" cx="15" cy="18" r="1.4"/>', quality: '<rect x="2.75" y="4.25" width="18.5" height="13.5" rx="2.75"/><path d="M8.25 21h7.5M12 17.75V21"/>',
+  stable: '<rect x="2.75" y="4.75" width="18.5" height="14.5" rx="3"/><path d="M6.25 13.5v-3m3 5v-7m3 5.5v-4m3 6v-8m3 5.5v-3"/>', crop: '<path d="M6.25 3.25v13a1.5 1.5 0 0 0 1.5 1.5h13M17.75 20.75v-13a1.5 1.5 0 0 0-1.5-1.5h-13"/>',
+  ambient: '<circle cx="12" cy="12" r="4.25"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4m10.6 10.6 1.4 1.4M2.5 12h2m15 0h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+  cam: '<path d="M21 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2.5l1.5-2.5h6L17.5 7H19a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="3.5"/>'
+};
+const ico = (el, name) => { const s = el.tagName === 'svg' ? el : el.querySelector('svg') || el.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'svg')); s.setAttribute('viewBox', '0 0 24 24'); s.innerHTML = P[name]; };
+document.querySelectorAll('[data-i]').forEach(el => ico(el, el.dataset.i));
 
-/* ---------- Themed dropdowns (desktop only; touch keeps the native picker) ---------- */
-(()=>{const menu=document.createElement('div');menu.id='dd';menu.setAttribute('role','listbox');menu.hidden=true;document.body.append(menu);
-const fine=matchMedia('(pointer:fine)');let cur=null,act=-1;
-const mark=sc=>{[...menu.children].forEach((c,i)=>c.classList.toggle('act',i===act));const el=menu.children[act];if(sc&&el)el.scrollIntoView({block:'nearest'})};
-function close(){if(menu.hidden)return;menu.hidden=true;cur&&cur.setAttribute('aria-expanded','false');cur=null}
-function open(s){close();cur=s;s.setAttribute('aria-expanded','true');menu.innerHTML=[...s.options].map((o,i)=>`<div role="option" data-i="${i}"${o.selected?' class="sel"':''}>${esc(o.text)}</div>`).join('');
-menu.hidden=false;menu.style.maxHeight='';menu.style.minWidth=s.offsetWidth+'px';
-const r=s.getBoundingClientRect(),below=innerHeight-r.bottom-14,above=r.top-14,up=menu.scrollHeight>below&&above>below;menu.style.maxHeight=Math.max(120,Math.min(340,up?above:below))+'px';
-const mh=menu.offsetHeight,mw=menu.offsetWidth;menu.style.left=Math.max(8,Math.min(innerWidth-mw-8,r.left))+'px';menu.style.top=(up?r.top-mh-6:r.bottom+6)+'px';menu.style.transformOrigin=up?'bottom':'top';
-act=Math.max(0,s.selectedIndex);mark(true)}
-function pick(i){const s=cur;if(!s||!s.options[i])return;close();const v=s.options[i].value;if(s.value!==v){s.value=v;s.dispatchEvent(new Event('input',{bubbles:true}));s.dispatchEvent(new Event('change',{bubbles:true}))}s.focus({preventScroll:true})}
-document.addEventListener('mousedown',e=>{const s=e.target.closest&&e.target.closest('select');
-if(s&&fine.matches&&e.button===0&&!s.disabled){e.preventDefault();s.focus({preventScroll:true});cur===s&&!menu.hidden?close():open(s);return}
-if(!menu.contains(e.target))close()},true);
-menu.onmousedown=e=>e.preventDefault();menu.onclick=e=>{const o=e.target.closest('[data-i]');o&&pick(+o.dataset.i)};
-menu.onmousemove=e=>{const o=e.target.closest('[data-i]');if(o&&+o.dataset.i!==act){act=+o.dataset.i;mark(false)}};
-document.addEventListener('keydown',e=>{if(!menu.hidden){const n=menu.children.length;
-if(e.key==='ArrowDown'){act=(act+1)%n;mark(true);e.preventDefault()}else if(e.key==='ArrowUp'){act=(act-1+n)%n;mark(true);e.preventDefault()}
-else if(e.key==='Enter'||e.key===' '){pick(act);e.preventDefault()}else if(e.key==='Escape'||e.key==='Tab')close();return}
-const s=e.target;if(fine.matches&&s.tagName==='SELECT'&&(e.key==='Enter'||e.key===' '||(e.altKey&&e.key==='ArrowDown'))){e.preventDefault();open(s)}},true);
-addEventListener('scroll',e=>{if(!menu.contains(e.target))close()},true);addEventListener('resize',close);addEventListener('blur',close)})();
+// ---------- helpers ----------
+// CSS-driven (no dependency on the motion library): .in = visible, removing it fades out. Repeats of a visible message
+// just extend it, and at most 4 are stacked.
+function toast(msg) {
+  const box = $('toasts'), dup = [...box.children].find(x => x.textContent === msg && !x._gone);
+  if (dup) { clearTimeout(dup._t); dup._t = setTimeout(dup._close, 3800); return; }
+  while (box.children.length >= 4) box.firstElementChild.remove();
+  const t = Object.assign(document.createElement('div'), {className: 'toast', textContent: msg});
+  t._close = () => { t._gone = true; t.classList.remove('in'); setTimeout(() => t.remove(), 300); };
+  box.append(t); t.getBoundingClientRect(); t.classList.add('in');
+  t._t = setTimeout(t._close, 3800);
+}
+const open = el => !!el._open;
+function setOpen(el, on, off) {
+  if (open(el) === on && (on || el.hidden)) return;
+  el._open = on; el._a?.stop?.();
+  if (on) { el.hidden = false; el.style.opacity = el.style.transform = ''; el._a = anim(el, {opacity: [0, 1], ...Object.fromEntries(Object.entries(off).map(([k, v]) => [k, [v, k === 'scale' ? 1 : 0]]))}); }
+  else { const a = el._a = anim(el, {opacity: 0, ...off}, {type: 'spring', stiffness: 520, damping: 38}); const done = () => { if (!el._open) { el.hidden = true; el.style.opacity = el.style.transform = ''; } }; a ? a.finished.then(done, done) : done(); }
+}
+const MORE_OFF = {y: 10, scale: .94}, LIST_OFF = {x: 32};
+const fmt = s => isFinite(s) ? (s >= 3600 ? Math.floor(s / 3600) + ':' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') : Math.floor(s / 60)) + ':' + String(Math.floor(s % 60)).padStart(2, '0') : '0:00';
+const dur = () => V.duration || 0;
+const pct = t => (dur() ? t / dur() * 100 : 0) + '%';
+new ResizeObserver(() => document.documentElement.style.setProperty('--barh', $('bar').offsetHeight + 'px')).observe($('bar'));
 
-/* ---------- Text-generation intro: words stream in top to bottom ---------- */
-function genText(){const done=()=>html.classList.remove('gen');
-if(lite()||matchMedia('(prefers-reduced-motion:reduce)').matches)return done();
-try{const tw=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode(n){if(!n.nodeValue.trim())return NodeFilter.FILTER_REJECT;const p=n.parentElement;
-if(!p||!p.closest('.nav,main,footer')||p.closest('select,option,code,script,style,.log,#toasts,#tt,[hidden],h1 b'))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT}}),nodes=[];let nd;while(nd=tw.nextNode())nodes.push(nd);
-const units=[],rg=document.createRange();
-for(const n of nodes){rg.selectNodeContents(n);const rc=rg.getBoundingClientRect();if(!rc.width)continue;
-const one=/flex|grid/.test(getComputedStyle(n.parentElement).display),parts=one?[n.nodeValue]:n.nodeValue.split(/(\s+)/),fr=document.createDocumentFragment();
-for(const s of parts){if(!s)continue;if(!one&&/^\s+$/.test(s)){fr.append(s);continue}const sp=document.createElement('span');sp.className='gw0';sp.textContent=s;fr.append(sp);units.push(sp)}n.replaceWith(fr)}
-document.querySelectorAll('h1 b').forEach(b=>{b.classList.add('gw0');units.push(b)});
-const R=units.map(u=>{const r=u.getBoundingClientRect();return{u,x:r.right+scrollX,y:r.top+scrollY,h:r.height,k:Math.round((r.top+scrollY+r.height/2)/14)}}).filter(o=>o.h>0).sort((a,b)=>a.k-b.k||a.x-b.x);
-if(!R.length)return done();
-const step=Math.min(.022,3/R.length),d0=.1,end=d0+R.length*step;R.forEach((o,i)=>{o.u.style.animationDelay=(d0+i*step).toFixed(3)+'s';o.u.classList.replace('gw0','gw')});done();
-setTimeout(()=>R.forEach(o=>{o.u.classList.remove('gw');o.u.style.animationDelay='';if(o.u.tagName==='SPAN'&&o.u.parentNode&&o.u.firstChild)o.u.replaceWith(o.u.firstChild)}),(end+.9)*1000)}
-catch(e){done();log('intro: '+errMsg(e),'warn')}}
-genText();
+function initMotion() {
+  if (!M) return;
+  M.animate('#drop > :not(.cone)', {opacity: [0, 1], y: [14, 0]}, {delay: M.stagger(.07), type: 'spring', stiffness: 260, damping: 24});
+  M.hover('.ib, .chip, #play', el => { M.animate(el, {scale: 1.1}, spring); return () => M.animate(el, {scale: 1}, spring); });
+  M.press('button', el => { M.animate(el, {scale: .9}, {type: 'spring', stiffness: 600, damping: 28}); return () => M.animate(el, {scale: 1}, spring); });
+}
 
-/* ---------- measure the real display refresh rate (all animations are rAF/compositor driven, so they follow it) ---------- */
-(()=>{const d=[];let p=0;const f=t=>{if(p)d.push(t-p);p=t;if(d.length<45)requestAnimationFrame(f);else{d.sort((a,b)=>a-b);const m=d[d.length>>1];hz=Math.round(1000/m);log(`display refresh ≈ ${hz} Hz`,'ok');stats()}};requestAnimationFrame(f)})();
+// ---------- idle auto-hide ----------
+let idleT;
+const busy = () => open($('more')) || open($('list')) || open($('qmenu'));
+const wake = () => { document.body.classList.remove('idle'); clearTimeout(idleT); if (!V.paused && !busy() && !document.body.classList.contains('dev-mode') && idx >= 0) idleT = setTimeout(() => document.body.classList.add('idle'), 2800); };
+['pointermove', 'pointerdown', 'keydown', 'touchstart'].forEach(t => addEventListener(t, wake, {passive: true}));
+
+// ---------- intake ----------
+const SUBS = ['srt', 'ass', 'ssa', 'vtt'];
+let fresh = new Set(), freshT = 0, autoOpened = false;
+function addFiles(files, {dropped = false} = {}) {
+  const ok = [];
+  for (const f of files) {
+    if (SUBS.includes(ext(f.name))) { addSub(f); continue; }
+    MEDIA.includes(ext(f.name)) ? ok.push(f) : toast(`${f.name}: unsupported format`);
+  }
+  if (!ok.length) return;
+  const start = queue.length, first = idx < 0; queue.push(...ok);
+  fresh = new Set(ok.map((_, i) => start + i));
+  clearTimeout(freshT); freshT = setTimeout(() => { fresh.clear(); document.querySelectorAll('#items li.new').forEach(l => l.classList.remove('new')); }, 2600);
+  first ? play(start) : render();
+  // dropped (or "add more") media: pop the queue open so the newcomers are visible, then tuck it away again
+  if (dropped || !first) showFresh(first && ok.length === 1);
+}
+function showFresh(skip) {
+  if (skip) return;
+  const was = open($('list'));
+  setOpen($('more'), false, MORE_OFF); closeQ(); render(); setOpen($('list'), true, LIST_OFF); pause();
+  $('items').querySelector('li.new')?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+  if (was) return;
+  autoOpened = true; clearTimeout(showFresh.t);
+  showFresh.t = setTimeout(() => { if (autoOpened && open($('list'))) closeMenus(); autoOpened = false; }, 3600);
+}
+$('list').addEventListener('pointerdown', () => { autoOpened = false; });
+async function addSub(f) {
+  if (idx < 0) return toast('Load a video first, then add subtitles');
+  try { await lib; const ok = await V.addSubtitleFile(f, f.name.replace(/\.[^.]+$/, '')); toast(ok ? `Subtitles loaded: ${f.name}` : 'Could not read subtitle file'); refreshBtns(); } catch { toast('Could not read subtitle file'); }
+}
+let askT = 0;
+function cancelAsk() { clearTimeout(askT); document.querySelectorAll('#items li.ask').forEach(l => l.classList.remove('ask')); }
+function removeAt(r) {
+  if (r < 0 || r >= queue.length) return;
+  const wasCur = r === idx;
+  queue.splice(r, 1); fresh.clear();
+  if (r < idx) idx--;
+  if (wasCur) {
+    if (queue.length) { idx = -1; play(Math.min(r, queue.length - 1)); return; }
+    idx = -1; clearLoop(); stopViz(); try { V.pause(); } catch {}
+    V.style.display = 'none'; document.body.classList.remove('has', 'idle'); $('title').textContent = ''; setPlay(false);
+  }
+  render();
+}
+function render() {
+  clearTimeout(askT);
+  const ol = $('items'); ol.innerHTML = '';
+  queue.forEach((f, i) => {
+    const li = document.createElement('li'); li.className = (i === idx ? 'cur ' : '') + (fresh.has(i) ? 'new' : ''); li.dataset.i = i;
+    const gr = document.createElement('span'); gr.className = 'grip'; gr.title = 'Drag to reorder'; ico(gr, 'grip');
+    const lab = document.createElement('span'); lab.className = 'lab'; lab.textContent = f.name || f;
+    const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'rm'; rm.title = 'Remove from queue'; rm.setAttribute('aria-label', 'Remove from queue'); ico(rm, 'minus');
+    const cf = document.createElement('div'); cf.className = 'cf';
+    const yes = Object.assign(document.createElement('button'), {type: 'button', className: 'yes', textContent: 'Remove'});
+    const no = Object.assign(document.createElement('button'), {type: 'button', className: 'no', textContent: 'Cancel'});
+    cf.append(yes, no); li.append(gr, lab, rm, cf);
+    li.onclick = () => play(+li.dataset.i);
+    rm.onclick = e => { e.stopPropagation(); cancelAsk(); li.classList.add('ask'); askT = setTimeout(cancelAsk, 4000); };
+    yes.onclick = e => { e.stopPropagation(); removeAt(+li.dataset.i); };
+    no.onclick = e => { e.stopPropagation(); cancelAsk(); };
+    initDrag(li, gr);
+    ol.append(li);
+  });
+}
+// drag to reorder (pointer events: mouse, touch and pen). Siblings move, the dragged row only follows the pointer.
+function initDrag(li, grip) {
+  grip.addEventListener('click', e => e.stopPropagation());
+  grip.addEventListener('pointerdown', e => {
+    if (e.button) return;
+    e.preventDefault(); e.stopPropagation(); cancelAsk(); autoOpened = false;
+    const ol = $('items'), id = e.pointerId; let y = e.clientY, cy = e.clientY, sy = ol.scrollTop, r = 0;
+    li.classList.add('dragging'); document.body.classList.add('reordering');
+    const step = () => {
+      li.style.transform = `translateY(${cy - y + ol.scrollTop - sy}px)`;
+      const b = li.getBoundingClientRect(), c = b.top + b.height / 2, p = li.previousElementSibling, n = li.nextElementSibling;
+      if (p) { const pr = p.getBoundingClientRect(); if (c < pr.top + pr.height / 2) { ol.insertBefore(p, li.nextSibling); y -= pr.height; return step(); } }
+      if (n) { const nr = n.getBoundingClientRect(); if (c > nr.top + nr.height / 2) { ol.insertBefore(n, li); y += nr.height; return step(); } }
+    };
+    const loop = () => {
+      const b = ol.getBoundingClientRect();
+      if (cy < b.top + 40) ol.scrollTop -= 10; else if (cy > b.bottom - 40) ol.scrollTop += 10;
+      step(); r = requestAnimationFrame(loop);
+    };
+    const mv = ev => { if (ev.pointerId === id) cy = ev.clientY; };
+    const end = ev => {
+      if (ev.pointerId !== id) return;
+      cancelAnimationFrame(r); removeEventListener('pointermove', mv); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+      li.style.transform = ''; li.classList.remove('dragging'); document.body.classList.remove('reordering');
+      const order = [...ol.children].map(l => +l.dataset.i);
+      if (order.some((v, i) => v !== i)) { queue = order.map(i => queue[i]); if (idx >= 0) idx = order.indexOf(idx); fresh.clear(); }
+      render();
+    };
+    addEventListener('pointermove', mv); addEventListener('pointerup', end); addEventListener('pointercancel', end);
+    r = requestAnimationFrame(loop);
+  });
+}
+const openUrl = e => { e?.preventDefault(); const u = prompt('Video / audio / HLS (.m3u8) / DASH (.mpd) URL'); if (!u) return; queue.push(u.trim()); play(queue.length - 1); };
+$('url').onclick = openUrl;
+
+// ---------- playback ----------
+async function play(i) {
+  if (i < 0 || i >= queue.length) return;
+  idx = i; render(); clearLoop(); stopViz(); wake();
+  const s = queue[i];
+  document.body.classList.add('has'); document.body.classList.remove('idle'); $('title').textContent = s.name || s;
+  try { await lib; } catch { return; }
+  if (idx !== i) return;
+  V.style.display = 'block'; V.sw = 'auto'; V.src = s;
+  try { await V.play(); } catch (err) { if (err?.name === 'NotAllowedError') toast('Press play to start'); }
+}
+const setPlay = p => { const b = $('play'); if (b.dataset.i === (p ? 'pause' : 'play')) return; b.dataset.i = p ? 'pause' : 'play'; ico(b, b.dataset.i); anim(b.firstChild, {scale: [.6, 1], rotate: [-30, 0]}); wake(); };
+V.addEventListener('error', e => toast('Playback error: ' + (e.detail?.message || e.detail || 'unsupported or corrupt file')));
+V.addEventListener('loadeddata', () => { const ao = !V.videoWidth; V.style.display = ao ? 'none' : 'block'; ao ? startViz() : stopViz(); refreshBtns(); });
+V.addEventListener('trackschange', refreshBtns);
+V.addEventListener('ended', () => idx + 1 < queue.length && play(idx + 1));
+V.addEventListener('play', () => setPlay(true));
+V.addEventListener('pause', () => setPlay(false));
+V.addEventListener('statechange', e => { if (e.detail === 'playing') setPlay(true); else if (e.detail === 'paused') setPlay(false); });
+V.addEventListener('volumechange', () => { const b = $('mute'); b.dataset.i = V.muted || !V.volume ? 'mute' : 'vol'; ico(b, b.dataset.i); });
+
+// ---------- spectrum: NCS-style mirrored bars, rAF at the display's refresh rate, time-based smoothing ----------
+// Resizing never restarts it: the loop keeps running, bar state survives (it is resampled if the bar count changes),
+// and the canvas is only re-sized inside the frame that draws it, so there is no blank or stuttering frame.
+const g = VIZ.getContext('2d', {desynchronized: true});
+let W = 0, H = 0, DPR = 1, dirty = true, grad, glow, bars = null, peaks = null, vel = null, fft = null, lo = null, hi = null, tilt = null, N = 0, last = 0, binKey = '', bass = 0;
+const resample = (a, n) => { const o = new Float32Array(n); if (a) for (let i = 0; i < n; i++) o[i] = a[Math.min(a.length - 1, Math.floor(i * a.length / n))]; return o; };
+new ResizeObserver(() => { dirty = true; }).observe(VIZ);
+addEventListener('resize', () => { dirty = true; });
+function fit() {
+  if (!dirty && W) return true;
+  const dpr = Math.min(devicePixelRatio || 1, 2), w = VIZ.clientWidth, h = VIZ.clientHeight;
+  if (!w || !h) return false;
+  dirty = false;
+  if (w === W && h === H && dpr === DPR) return true;
+  W = w; H = h; DPR = dpr;
+  VIZ.width = Math.round(w * dpr); VIZ.height = Math.round(h * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  grad = g.createLinearGradient(0, H * .2, 0, H * .62); grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#ff7a1a');
+  glow = g.createRadialGradient(W / 2, H * .62, 0, W / 2, H * .62, Math.max(W, H) * .45); glow.addColorStop(0, 'rgba(255,122,26,.5)'); glow.addColorStop(1, 'rgba(255,122,26,0)');
+  const n = w < 600 ? 28 : 56;
+  if (n !== N) { N = n; bars = resample(bars, n); peaks = resample(peaks, n); vel = resample(vel, n); binKey = ''; }
+  return true;
+}
+// map each bar (per side, 0 = lowest = centre) to a log-spaced FFT bin range
+function prep() {
+  const nb = an.frequencyBinCount, sr = an.context.sampleRate, key = N + ':' + nb + ':' + sr;
+  if (key !== binKey) {
+    binKey = key; fft = new Uint8Array(nb); lo = new Uint16Array(N); hi = new Uint16Array(N); tilt = new Float32Array(N);
+    const nyq = sr / 2, f0 = 35, f1 = Math.min(16000, nyq * .95), at = i => Math.min(nb, f0 * Math.pow(f1 / f0, i / N) / nyq * nb);
+    for (let i = 0; i < N; i++) { lo[i] = Math.min(nb - 1, Math.floor(at(i))); hi[i] = Math.max(lo[i] + 1, Math.floor(at(i + 1))); tilt[i] = .9 + .9 * (i / N); }
+  }
+  an.getByteFrequencyData(fft);
+}
+function frame(t) {
+  raf = requestAnimationFrame(frame);
+  const dt = Math.min(.05, (t - last) / 1000 || .016); last = t;
+  if (!fit()) return;
+  const have = !!an; if (have) prep();
+  const up = 1 - Math.exp(-dt * 42), down = 1 - Math.exp(-dt * 8);
+  g.clearRect(0, 0, W, H);
+  const uw = Math.min(W * .92, 1200), step = uw / (2 * N), bw = Math.max(2, step * .66), cx = W / 2, base = H * .62, maxH = H * .5;
+  let bs = 0;
+  for (let i = 0; i < N; i++) {
+    let m = 0; if (have) for (let k = lo[i]; k < hi[i]; k++) if (fft[k] > m) m = fft[k];
+    const tg = Math.min(1, Math.pow(m / 255 * tilt[i], 1.6));
+    bars[i] += (tg - bars[i]) * (tg > bars[i] ? up : down);
+    if (bars[i] >= peaks[i]) { peaks[i] = bars[i]; vel[i] = 0; } else { vel[i] += dt * 1.8; peaks[i] = Math.max(0, peaks[i] - vel[i] * dt); }
+    if (i < 5) bs += bars[i];
+  }
+  bass += (bs / 5 - bass) * (bs / 5 > bass ? up : 1 - Math.exp(-dt * 5));
+  g.globalAlpha = Math.min(1, bass * 1.1); g.fillStyle = glow; g.fillRect(0, 0, W, H);
+  g.globalAlpha = 1; g.fillStyle = grad; g.beginPath();
+  const xs = (i, s) => s ? cx + i * step + (step - bw) / 2 : cx - (i + 1) * step + (step - bw) / 2;
+  for (let s = 0; s < 2; s++) for (let i = 0; i < N; i++) {
+    const h = Math.max(3, bars[i] * maxH), x = xs(i, s);
+    g.roundRect ? g.roundRect(x, base - h, bw, h, Math.min(bw / 2, 4)) : g.rect(x, base - h, bw, h);
+  }
+  g.fill();
+  g.globalAlpha = .12; g.beginPath();
+  for (let s = 0; s < 2; s++) for (let i = 0; i < N; i++) g.rect(xs(i, s), base + 6, bw, Math.max(3, bars[i] * maxH) * .45);
+  g.fill(); g.globalAlpha = .9; g.fillStyle = '#fff'; g.beginPath();
+  for (let s = 0; s < 2; s++) for (let i = 0; i < N; i++) g.rect(xs(i, s), base - Math.max(3, peaks[i] * maxH) - 5, bw, 2);
+  g.fill(); g.globalAlpha = 1;
+}
+function startViz() { VIZ.style.display = 'block'; cancelAnimationFrame(raf); dirty = true; last = performance.now(); raf = requestAnimationFrame(frame); }
+function stopViz() { cancelAnimationFrame(raf); VIZ.style.display = 'none'; }
+document.addEventListener('visibilitychange', () => { if (document.hidden) cancelAnimationFrame(raf); else if (VIZ.style.display === 'block') { cancelAnimationFrame(raf); dirty = true; last = performance.now(); raf = requestAnimationFrame(frame); } });
+
+// ---------- seek + A-B loop ----------
+function clearLoop() { A = B = null; drawLoop(); }
+function drawLoop() {
+  $('mA').style.display = A != null ? 'flex' : 'none'; $('mB').style.display = B != null ? 'flex' : 'none';
+  if (A != null) $('mA').style.left = pct(A);
+  if (B != null) $('mB').style.left = pct(B);
+  const on = A != null && B != null; $('loop').style.display = on ? 'block' : 'none';
+  if (on) { $('loop').style.left = pct(A); $('loop').style.width = pct(B - A); }
+  $('setA').classList.toggle('on', A != null); $('setB').classList.toggle('on', B != null); $('clr').hidden = A == null && B == null;
+}
+$('setA').onclick = () => { A = V.currentTime; if (B != null && B <= A) B = null; drawLoop(); };
+$('setB').onclick = () => { if (A == null) A = 0; if (V.currentTime > A) { B = V.currentTime; drawLoop(); } else toast('Loop end must come after the start'); };
+$('clr').onclick = clearLoop;
+V.addEventListener('timeupdate', () => {
+  $('fill').style.width = pct(V.currentTime); $('time').textContent = `${fmt(V.currentTime)} / ${fmt(dur())}`;
+  try { const b = V.buffered; if (b?.length) $('buf').style.width = pct(b.end(b.length - 1)); } catch {}
+  drawLoop();
+});
+(function loopWatch() { if (A != null && B != null && !V.paused && V.currentTime >= B) V.currentTime = A; requestAnimationFrame(loopWatch); })();
+const seekAt = x => { const r = $('seek').getBoundingClientRect(); return Math.min(1, Math.max(0, (x - r.left) / r.width)) * dur(); };
+$('seek').addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const mk = e.target.closest?.('.mk'), el = $('seek');
+  el.setPointerCapture(e.pointerId);
+  const set = x => { const t = seekAt(x); if (mk) { mk === $('mA') ? A = t : B = t; if (A != null && B != null && B < A) [A, B] = [B, A]; drawLoop(); } else V.currentTime = t; };
+  if (!mk) set(e.clientX);
+  const mv = ev => set(ev.clientX), up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); };
+  el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+});
+
+// ---------- controls ----------
+const toggle = () => { if (idx < 0) return $('file').click(); V.paused ? V.play() : V.pause(); };
+$('play').onclick = toggle;
+$('stage').onclick = e => {
+  if (e.target.closest('#drop')) return;
+  if (busy()) { closeMenus(); return; }
+  if (document.body.classList.contains('idle')) return wake();
+  toggle();
+};
+$('prev').onclick = () => play(idx - 1); $('next').onclick = () => play(idx + 1);
+$('rate').onclick = () => { rateIdx = (rateIdx + 1) % RATES.length; V.playbackRate = RATES[rateIdx]; $('rate').textContent = RATES[rateIdx] + '×'; };
+$('vol').oninput = e => { V.volume = +e.target.value; V.muted = false; };
+$('mute').onclick = () => V.muted = !V.muted;
+$('fs').onclick = () => document.fullscreenElement ? document.exitFullscreen() : (document.documentElement.requestFullscreen?.() || toast('Fullscreen unavailable'));
+function closeQ() { setOpen($('qmenu'), false, MORE_OFF); }
+function closeMenus() { setOpen($('more'), false, MORE_OFF); setOpen($('list'), false, LIST_OFF); closeQ(); wake(); }
+const pause = () => { document.body.classList.remove('idle'); clearTimeout(idleT); };
+$('mo').onclick = () => { if (open($('more'))) return closeMenus(); closeQ(); setOpen($('list'), false, LIST_OFF); setOpen($('more'), true, MORE_OFF); pause(); };
+$('pl').onclick = () => { if (open($('list'))) return closeMenus(); autoOpened = false; closeQ(); setOpen($('more'), false, MORE_OFF); render(); setOpen($('list'), true, LIST_OFF); pause(); };
+$('plx').onclick = closeMenus;
+
+// movi features: audio/subtitle tracks, aspect, rotate, HDR, snapshot, PiP
+const MP = () => V.player;
+const nm = t => t.label || t.language || t.lang || t.codec || ('#' + t.id);
+const act = (kind) => { try { return MP()?.trackManager?.['getActive' + kind + 'Track']?.() || null; } catch { return null; } };
+function refreshBtns() {
+  try { const a = MP()?.getAudioTracks?.() || [], s = MP()?.getSubtitleTracks?.() || [];
+    $('aud').style.display = a.length > 1 ? '' : 'none';
+    const ca = act('Audio'); $('audv').textContent = ca ? nm(ca) : '';
+    const cs = act('Subtitle'); $('subv').textContent = cs ? nm(cs) : 'Off'; $('sub').classList.toggle('on', !!cs);
+    $('qualv').textContent = curQuality();
+  } catch {}
+  syncToggles();
+}
+async function cycleTrack(get, sel, label, valEl) {
+  try {
+    const tr = MP()[get](); if (!tr.length) return toast('No ' + label + ' tracks');
+    const c = act(label === 'subtitle' ? 'Subtitle' : 'Audio'), cur = c ? tr.findIndex(t => t.id === c.id) : -1;
+    const nxt = label === 'subtitle' ? (cur + 1 >= tr.length ? null : tr[cur + 1]) : tr[(cur + 1) % tr.length];
+    await MP()[sel](nxt ? nxt.id : null); const v = nxt ? nm(nxt) : 'Off'; $(valEl).textContent = v; $(valEl).parentElement.classList.toggle('on', !!nxt && label === 'subtitle'); toast(`${label[0].toUpperCase() + label.slice(1)}: ${v}`);
+  } catch { toast('Track switch failed'); }
+}
+$('aud').onclick = () => cycleTrack('getAudioTracks', 'selectAudioTrack', 'audio', 'audv');
+$('sub').onclick = () => (MP()?.getSubtitleTracks?.().length ? cycleTrack('getSubtitleTracks', 'selectSubtitleTrack', 'subtitle', 'subv') : toast('No embedded subtitles — add a .srt / .ass / .vtt file'));
+$('subadd').onclick = e => { if (e.target.id !== 'subfile') $('subfile').click(); };
+$('subfile').onchange = e => { [...e.target.files].forEach(addSub); e.target.value = ''; };
+
+// quality: adaptive (HLS/DASH) rungs when the source has them, otherwise show what is playing
+const curQuality = () => { const h = V.videoHeight; const t = act('Video'); if (t && t.id === -1) return h ? `Auto · ${h}p` : 'Auto'; return h ? h + 'p' : '—'; };
+function qualityList() {
+  const tr = (MP()?.getVideoTracks?.() || []).filter(t => t.id === -1 || t.height > 0);
+  const seen = new Set(), out = [];
+  tr.sort((a, b) => a.id === -1 ? -1 : b.id === -1 ? 1 : (b.height - a.height) || ((b.bitRate || 0) - (a.bitRate || 0)));
+  for (const t of tr) { const l = t.id === -1 ? 'Auto' : t.label || t.height + 'p'; if (!seen.has(l)) { seen.add(l); out.push({t, l}); } }
+  return out;
+}
+const badge = h => h >= 4320 ? '8K' : h >= 2160 ? '4K' : h >= 720 ? 'HD' : '';
+$('qual').onclick = () => {
+  const list = qualityList();
+  if (list.length < 2) return toast(`Quality: ${curQuality()} — this source has a single quality`);
+  const a = act('Video'), q = $('qmenu'); q.innerHTML = '';
+  list.forEach(({t, l}) => {
+    const b = document.createElement('button'); b.className = 'item' + (a && a.id === t.id ? ' cur' : '');
+    const sp = document.createElement('span'); sp.textContent = l === 'Auto' && a?.id === -1 && V.videoHeight ? `Auto (${V.videoHeight}p)` : l; b.append(sp);
+    const bd = badge(t.height || 0); if (bd) b.insertAdjacentHTML('beforeend', `<em class="tag">${bd}</em>`);
+    b.onclick = e => { e.stopPropagation(); try { MP().trackManager.selectVideoTrack(t.id); } catch { toast('Quality switch failed'); } closeQ(); setOpen($('more'), false, MORE_OFF); $('qualv').textContent = l; toast('Quality: ' + l); wake(); };
+    q.append(b);
+  });
+  setOpen($('more'), false, MORE_OFF); setOpen($('qmenu'), true, MORE_OFF);
+};
+V.addEventListener('qualitychange', () => { $('qualv').textContent = curQuality(); });
+
+// stable volume / crop black bars / ambient — thin wrappers over movi's own switches
+// Ambient box must match the picture's own aspect ratio, otherwise the box (fixed 16:9) leaves black bars
+// above/below (or left/right) of the video whenever the window or the video isn't 16:9.
+function setAR() {
+  let w = V.videoWidth, h = V.videoHeight;
+  if (!(w > 0 && h > 0)) { const t = (MP()?.getVideoTracks?.() || []).find(t => t.width > 0 && t.height > 0); if (t) { w = t.width; h = t.height; } }
+  let r = w > 0 && h > 0 ? w / h : 16 / 9;
+  if (rotIdx % 180 && 'rotate' in (customElements.get('movi-player')?.prototype || {})) r = 1 / r; // 90°/270° swaps the shape
+  document.body.style.setProperty('--arn', Math.min(Math.max(r, 0.4), 4).toFixed(4));
+}
+function syncToggles() {
+  setAR();
+  const set = (id, vid, on) => { $(vid).textContent = on ? 'On' : 'Off'; $(id).classList.toggle('on', on); };
+  set('stab', 'stabv', !!V.stableVolume); set('crop', 'cropv', !!V.cropbars);
+  const vid = !!V.videoWidth; set('amb', 'ambv', !!V.ambientMode);
+  document.body.classList.toggle('amb-on', !!V.ambientMode && vid);
+}
+$('stab').onclick = () => { V.stableVolume = !V.stableVolume; syncToggles(); toast('Stable volume ' + (V.stableVolume ? 'on' : 'off')); };
+$('crop').onclick = () => { if (!V.videoWidth) return toast('Crop applies to video only'); V.cropbars = !V.cropbars; syncToggles(); toast(V.cropbars ? 'Black bars cropped' : 'Black bars kept'); };
+$('amb').onclick = () => { if (!V.videoWidth) return toast('Ambient mode applies to video only'); V.ambientMode = !V.ambientMode; syncToggles(); toast('Ambient mode ' + (V.ambientMode ? 'on' : 'off')); };
+V.addEventListener('volumechange', syncToggles);
+
+$('asp').onclick = () => { const m = ['contain', 'cover', 'fill', 'zoom']; V.objectFit = m[aspIdx = (aspIdx + 1) % m.length]; $('aspv').textContent = V.objectFit; };
+$('rot').onclick = () => { V.rotate = (rotIdx = (rotIdx + 90) % 360); $('rotv').textContent = rotIdx + '°'; setAR(); };
+$('snap').onclick = async () => {
+  // Lossless: grab the decoded frame at its native resolution (no scaling, no overlay) and encode as PNG.
+  // Falls back to the rendered canvas if the raw frame is unavailable.
+  if (!V.videoWidth) return toast('Snapshot applies to video only');
+  const toPng = c => new Promise(r => c.toBlob(r, 'image/png'));
+  let blob = null;
+  try {
+    const f = MP()?.getCurrentVideoFrame?.();
+    if (f) {
+      const el = f instanceof HTMLVideoElement, w = el ? f.videoWidth : f.displayWidth, h = el ? f.videoHeight : f.displayHeight;
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const x = c.getContext('2d', {colorSpace: 'srgb', alpha: false}); x.imageSmoothingEnabled = false; x.drawImage(f, 0, 0, w, h);
+      // reject an all-black readback (some GPUs return one) and fall through to the canvas path
+      const d = x.getImageData(0, 0, Math.min(w, 64), Math.min(h, 36)).data; let lit = false;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 8 || d[i + 1] > 8 || d[i + 2] > 8) { lit = true; break; }
+      if (lit) blob = await toPng(c);
+    }
+  } catch {}
+  if (!blob) { try { blob = await toPng(V.getCanvas()); } catch {} }
+  if (!blob) return toast('Snapshot failed');
+  const t = V.currentTime, p = n => String(Math.floor(n)).padStart(2, '0');
+  const name = `${(queue[idx]?.name || 'snapshot').replace(/\.[^.]+$/, '')}-${p(t / 3600)}-${p(t % 3600 / 60)}-${p(t % 60)}.png`;
+  const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(blob), download: name});
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  toast(`Snapshot saved (${V.videoWidth}×${V.videoHeight} PNG)`);
+};
+
+document.addEventListener('fullscreenchange', syncToggles);
+addEventListener('keydown', e => {
+  const tg = e.target.tagName, k = e.key.toLowerCase();
+  if (tg === 'INPUT' && e.target.type !== 'range') return;
+  if (e.ctrlKey || e.metaKey || e.altKey || (tg === 'BUTTON' && (k === ' ' || k === 'enter')) || (tg === 'INPUT' && e.target.type === 'range' && k.startsWith('arrow'))) return;
+  const map = {f: 'fs', m: 'mute', a: 'setA', b: 'setB', s: 'snap', r: 'asp', t: 'rot', v: 'sub', n: 'aud', l: 'clr', u: 'stab', c: 'crop', g: 'amb', q: 'qual', d: 'dev-mode-switch'};
+  if (k === ' ') { e.preventDefault(); toggle(); }
+  else if (k === 'escape') closeMenus();
+  else if (k === 'arrowright') V.currentTime += 5; else if (k === 'arrowleft') V.currentTime -= 5;
+  else if (map[k]) $(map[k]).click();
+});
+
+$('file').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+$('file2').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+refreshBtns(); drawLoop();
+
+// ---------- developer mode + console (ported from moviplayer.com — movi-player by Ujjwal Gupta, Apache-2.0) ----------
+const devSw = $('dev-mode-switch'), dBody = $('dev-log-body'), dEmpty = $('dev-log-empty'), dCount = $('dev-log-count'), dSearch = $('dev-log-search');
+const dLevelsBtn = $('dev-log-levels-btn'), dLevelsLabel = $('dev-log-levels-label'), dLevelsMenu = $('dev-log-levels-menu'), dLevelsAll = $('dev-log-levels-all');
+const LEVELS = ['log', 'info', 'warn', 'error', 'debug'], levelsOn = new Set(LEVELS), MAXROWS = 5000;
+let dAuto = true, dHydrated = false, dQuery = '', dShown = 0;
+const filtered = () => dQuery !== '' || levelsOn.size !== LEVELS.length;
+const matches = e => !!e && levelsOn.has(e.level) && (dQuery === '' || e.text.toLowerCase().includes(dQuery));
+const ts = t => { const d = new Date(t), p = (n, w = 2) => String(n).padStart(w, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`; };
+const dTotal = () => window.__moviDevLog?.buffer?.length ?? 0;
+const dUpdate = () => { dCount.textContent = filtered() ? `${dShown} / ${dTotal()}` : String(dTotal()); };
+function dRow(e) {
+  const r = document.createElement('div'); r.className = 'dev-log-row ' + e.level;
+  for (const [c, t] of [['ts', ts(e.t)], ['lvl', e.level], ['msg', e.text]]) { const s = document.createElement('span'); s.className = c; s.textContent = t; r.append(s); }
+  return r;
+}
+function dAppend(e) {
+  if (!e) return;
+  if (matches(e)) {
+    dShown++; if (dEmpty.parentNode === dBody) dEmpty.remove();
+    dBody.append(dRow(e));
+    while (dBody.childElementCount > MAXROWS) dBody.firstElementChild.remove();
+    if (dAuto) dBody.scrollTop = dBody.scrollHeight;
+  }
+  dUpdate();
+}
+function dClearDom() { dBody.innerHTML = ''; dShown = 0; dEmpty.textContent = 'No logs yet.'; dBody.append(dEmpty); dUpdate(); }
+function dRender() {
+  if (!dHydrated) return;
+  const m = (window.__moviDevLog?.buffer || []).filter(matches); dShown = m.length; dBody.innerHTML = '';
+  if (!m.length) { dEmpty.textContent = filtered() ? 'No logs match the filter.' : 'No logs yet.'; dBody.append(dEmpty); dUpdate(); return; }
+  const f = document.createDocumentFragment(); for (const e of m.slice(-MAXROWS)) f.append(dRow(e));
+  dBody.append(f); dUpdate(); if (dAuto) dBody.scrollTop = dBody.scrollHeight;
+}
+function dHydrate() { if (dHydrated || !window.__moviDevLog) return; dHydrated = true; dRender(); window.__moviDevLog.subscribe(e => e === null ? dClearDom() : dAppend(e)); }
+let st; dSearch.addEventListener('input', () => { clearTimeout(st); st = setTimeout(() => { dQuery = dSearch.value.trim().toLowerCase(); dRender(); }, 120); });
+const boxes = [...dLevelsMenu.querySelectorAll('input[data-level]')];
+function syncLevels() {
+  const n = levelsOn.size;
+  dLevelsLabel.textContent = n === LEVELS.length ? 'All levels' : n === 0 ? 'No levels' : n === 1 ? boxes.find(b => levelsOn.has(b.dataset.level)).nextElementSibling.textContent : `${n} levels`;
+  dLevelsAll.checked = n === LEVELS.length; dLevelsAll.indeterminate = n > 0 && n < LEVELS.length;
+}
+const openLevels = o => { dLevelsMenu.hidden = !o; dLevelsBtn.setAttribute('aria-expanded', String(o)); };
+dLevelsBtn.addEventListener('click', e => { e.stopPropagation(); openLevels(dLevelsMenu.hidden); });
+dLevelsMenu.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => openLevels(false));
+addEventListener('keydown', e => { if (e.key === 'Escape' && !dLevelsMenu.hidden) openLevels(false); });
+dLevelsMenu.addEventListener('change', e => {
+  const b = e.target;
+  if (b === dLevelsAll) { levelsOn.clear(); if (b.checked) LEVELS.forEach(l => levelsOn.add(l)); boxes.forEach(x => x.checked = b.checked); }
+  else if (b.dataset.level) { b.checked ? levelsOn.add(b.dataset.level) : levelsOn.delete(b.dataset.level); } else return;
+  syncLevels(); dRender();
+});
+syncLevels();
+const dText = () => (window.__moviDevLog?.buffer || []).filter(matches).map(e => `[${ts(e.t)}] ${e.level.toUpperCase()} ${e.text}`).join('\n');
+const dFile = () => { const s = queue[idx]; let n = s?.name || (typeof s === 'string' ? s.split(/[?#]/)[0].split('/').pop() : ''); n = (n || '').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_').trim(); return (n || 'cone') + '.log'; };
+$('dev-log-clear').onclick = () => window.__moviDevLog?.clear();
+$('dev-log-download').onclick = () => {
+  const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(new Blob([dText() + '\n'], {type: 'text/plain;charset=utf-8'})), download: dFile()});
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  const b = $('dev-log-download'), o = b.textContent; b.textContent = 'Saved!'; setTimeout(() => b.textContent = o, 1200);
+};
+$('dev-log-copy').onclick = async () => {
+  const b = $('dev-log-copy'), o = b.textContent, t = dText();
+  try { await navigator.clipboard.writeText(t); b.textContent = 'Copied!'; }
+  catch { try { const ta = Object.assign(document.createElement('textarea'), {value: t}); ta.style.cssText = 'position:fixed;opacity:0'; document.body.append(ta); ta.select(); document.execCommand('copy'); ta.remove(); b.textContent = 'Copied!'; } catch { b.textContent = 'Copy failed'; } }
+  setTimeout(() => b.textContent = o, 1200);
+};
+$('dev-log-autoscroll').onclick = e => { dAuto = !dAuto; e.currentTarget.setAttribute('aria-pressed', String(dAuto)); e.currentTarget.textContent = 'Autoscroll: ' + (dAuto ? 'on' : 'off'); if (dAuto) dBody.scrollTop = dBody.scrollHeight; };
+function applyDev(on) {
+  document.body.classList.toggle('dev-mode', on); devSw.setAttribute('aria-checked', String(on));
+  if (on) { dHydrate(); document.body.classList.remove('idle'); clearTimeout(idleT); } else wake();
+}
+let devOn = false; try { devOn = localStorage.getItem('cone-dev') === '1'; } catch {}
+applyDev(devOn);
+devSw.onclick = e => { e.stopPropagation(); devOn = !devOn; applyDev(devOn); try { localStorage.setItem('cone-dev', devOn ? '1' : '0'); } catch {} if (devOn) console.info('Cone dev console on — skin over movi-player by Ujjwal Gupta (moviplayer.com)'); };
